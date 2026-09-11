@@ -14,6 +14,7 @@ type Cargo struct {
 	OriginStationID      pgtype.UUID        `json:"origin_station_id"`
 	DestinationStationID pgtype.UUID        `json:"destination_station_id"`
 	ExpeditionID         pgtype.UUID        `json:"expedition_id"`
+	LogisticsBatchID     pgtype.UUID        `json:"logistics_batch_id"`
 	Priority             string             `json:"priority"`
 	Status               string             `json:"status"`
 	CreatedByPersonnelID pgtype.UUID        `json:"created_by_personnel_id"`
@@ -52,6 +53,7 @@ type Emergency struct {
 	StationID             pgtype.UUID        `json:"station_id"`
 	ExpeditionID          pgtype.UUID        `json:"expedition_id"`
 	ReportedByPersonnelID pgtype.UUID        `json:"reported_by_personnel_id"`
+	EmergencyDeviceID     pgtype.UUID        `json:"emergency_device_id"`
 	ReportChannel         string             `json:"report_channel"`
 	Severity              string             `json:"severity"`
 	Status                string             `json:"status"`
@@ -63,6 +65,23 @@ type Emergency struct {
 	ResolvedAt            pgtype.Timestamptz `json:"resolved_at"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+type EmergencyDevice struct {
+	ID                 pgtype.UUID        `json:"id"`
+	PersonnelID        pgtype.UUID        `json:"personnel_id"`
+	DeviceLabel        string             `json:"device_label"`
+	Status             string             `json:"status"`
+	LastHeartbeatAt    pgtype.Timestamptz `json:"last_heartbeat_at"`
+	LastLatitude       pgtype.Numeric     `json:"last_latitude"`
+	LastLongitude      pgtype.Numeric     `json:"last_longitude"`
+	LastAccuracyM      pgtype.Numeric     `json:"last_accuracy_m"`
+	LastAltitudeM      pgtype.Numeric     `json:"last_altitude_m"`
+	LastHeadingDeg     pgtype.Numeric     `json:"last_heading_deg"`
+	LastSpeedMps       pgtype.Numeric     `json:"last_speed_mps"`
+	LastBatteryPercent pgtype.Numeric     `json:"last_battery_percent"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type EmergencyPersonnel struct {
@@ -93,16 +112,35 @@ type EmergencySignal struct {
 	ID                  pgtype.UUID        `json:"id"`
 	IdempotencyKey      pgtype.UUID        `json:"idempotency_key"`
 	PersonnelID         pgtype.UUID        `json:"personnel_id"`
+	DeviceID            pgtype.UUID        `json:"device_id"`
 	EmergencyID         pgtype.UUID        `json:"emergency_id"`
 	SignalType          string             `json:"signal_type"`
 	TransmissionChannel string             `json:"transmission_channel"`
 	Latitude            pgtype.Numeric     `json:"latitude"`
 	Longitude           pgtype.Numeric     `json:"longitude"`
 	LocationAccuracyM   pgtype.Numeric     `json:"location_accuracy_m"`
+	AltitudeM           pgtype.Numeric     `json:"altitude_m"`
+	HeadingDeg          pgtype.Numeric     `json:"heading_deg"`
+	SpeedMps            pgtype.Numeric     `json:"speed_mps"`
+	BatteryPercent      pgtype.Numeric     `json:"battery_percent"`
 	OccurredAt          pgtype.Timestamptz `json:"occurred_at"`
 	ReceivedAt          pgtype.Timestamptz `json:"received_at"`
 	SyncStatus          string             `json:"sync_status"`
 	PayloadNotes        *string            `json:"payload_notes"`
+}
+
+type EmergencySosConfirmation struct {
+	ID            pgtype.UUID        `json:"id"`
+	DeviceID      pgtype.UUID        `json:"device_id"`
+	PersonnelID   pgtype.UUID        `json:"personnel_id"`
+	EmergencyType string             `json:"emergency_type"`
+	Severity      string             `json:"severity"`
+	Summary       string             `json:"summary"`
+	Status        string             `json:"status"`
+	InitiatedAt   pgtype.Timestamptz `json:"initiated_at"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	ConfirmedAt   pgtype.Timestamptz `json:"confirmed_at"`
+	EmergencyID   pgtype.UUID        `json:"emergency_id"`
 }
 
 type EmergencyTimelineEvent struct {
@@ -182,6 +220,22 @@ type Item struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type LogisticsBatch struct {
+	ID                   pgtype.UUID        `json:"id"`
+	BatchCode            string             `json:"batch_code"`
+	ExpeditionID         pgtype.UUID        `json:"expedition_id"`
+	OriginStationID      pgtype.UUID        `json:"origin_station_id"`
+	DestinationStationID pgtype.UUID        `json:"destination_station_id"`
+	Status               string             `json:"status"`
+	PlannedDispatchAt    pgtype.Timestamptz `json:"planned_dispatch_at"`
+	EstimatedArrivalAt   pgtype.Timestamptz `json:"estimated_arrival_at"`
+	DispatchedAt         pgtype.Timestamptz `json:"dispatched_at"`
+	ReceivedAt           pgtype.Timestamptz `json:"received_at"`
+	Notes                *string            `json:"notes"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Personnel struct {
 	ID                     pgtype.UUID        `json:"id"`
 	PersonnelCode          string             `json:"personnel_code"`
@@ -192,6 +246,22 @@ type Personnel struct {
 	Status                 string             `json:"status"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PersonnelMovement struct {
+	ID                   pgtype.UUID        `json:"id"`
+	PersonnelID          pgtype.UUID        `json:"personnel_id"`
+	ExpeditionID         pgtype.UUID        `json:"expedition_id"`
+	MovementType         string             `json:"movement_type"`
+	OriginStationID      pgtype.UUID        `json:"origin_station_id"`
+	DestinationStationID pgtype.UUID        `json:"destination_station_id"`
+	Status               string             `json:"status"`
+	DepartedAt           pgtype.Timestamptz `json:"departed_at"`
+	EstimatedArrivalAt   pgtype.Timestamptz `json:"estimated_arrival_at"`
+	ArrivedAt            pgtype.Timestamptz `json:"arrived_at"`
+	Notes                *string            `json:"notes"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Station struct {

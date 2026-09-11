@@ -7,10 +7,17 @@ import (
 	"os"
 
 	db "github.com/TeamOrchestrators/drishti-backend/db/db/generated"
+	"github.com/TeamOrchestrators/drishti-backend/internal/emergency"
+	"github.com/TeamOrchestrators/drishti-backend/internal/expedition"
+	"github.com/TeamOrchestrators/drishti-backend/internal/inventory"
+	"github.com/TeamOrchestrators/drishti-backend/internal/logistics"
+	"github.com/TeamOrchestrators/drishti-backend/internal/personnel"
+	"github.com/TeamOrchestrators/drishti-backend/internal/station"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
+// APIConfig holds application-wide dependencies shared by handlers and services.
 type APIConfig struct {
 	database *db.Queries
 }
@@ -38,16 +45,20 @@ func main() {
 	}
 
 	queries := db.New(pool)
-
-	_ = &APIConfig{database: queries}
+	cfg := &APIConfig{database: queries}
 
 	mux := http.NewServeMux()
+	station.RegisterRoutes(mux, cfg.database)
+	personnel.RegisterRoutes(mux, cfg.database)
+	expedition.RegisterRoutes(mux, cfg.database)
+	inventory.RegisterRoutes(mux, cfg.database)
+	logistics.RegisterRoutes(mux, cfg.database)
+	emergency.RegisterRoutes(mux, cfg.database)
+
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
 	}
-
-	// Route Handler
 
 	log.Println("Starting server on http://localhost:8080")
 	if err := server.ListenAndServe(); err != nil {

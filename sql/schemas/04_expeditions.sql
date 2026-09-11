@@ -19,6 +19,10 @@ CREATE TABLE expeditions
     CHECK (actual_end_at IS NULL OR actual_start_at IS NULL OR actual_end_at >= actual_start_at)
 );
 
+ALTER TABLE personnel_movements
+    ADD CONSTRAINT personnel_movements_expedition_id_fkey
+    FOREIGN KEY (expedition_id) REFERENCES expeditions (id);
+
 CREATE TABLE expedition_members
 (
     expedition_id   UUID        NOT NULL REFERENCES expeditions (id) ON DELETE CASCADE,

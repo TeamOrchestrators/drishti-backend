@@ -20,6 +20,10 @@ CREATE TABLE expeditions
     CHECK (actual_end_at IS NULL OR actual_start_at IS NULL OR actual_end_at >= actual_start_at)
 );
 
+ALTER TABLE personnel_movements
+    ADD CONSTRAINT personnel_movements_expedition_id_fkey
+    FOREIGN KEY (expedition_id) REFERENCES expeditions (id);
+
 CREATE TABLE expedition_members
 (
     expedition_id   UUID        NOT NULL REFERENCES expeditions (id) ON DELETE CASCADE,
@@ -63,6 +67,8 @@ CREATE TRIGGER trg_expeditions_updated_at
 EXECUTE FUNCTION set_updated_at();
 
 -- +goose Down
+ALTER TABLE IF EXISTS personnel_movements
+    DROP CONSTRAINT IF EXISTS personnel_movements_expedition_id_fkey;
 DROP TABLE expedition_resource_allocations;
 DROP TABLE expedition_resource_requirements;
 DROP TABLE expedition_members;
