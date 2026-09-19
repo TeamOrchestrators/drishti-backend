@@ -1,0 +1,11 @@
+# Keep Docker build contexts small and never bake development secrets or local
+# data into an image.
+.git
+.env
+backups
+resources
+demo-data
+*.exe
+*.test
+coverage.*
+.idea

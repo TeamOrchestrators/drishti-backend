@@ -23,7 +23,20 @@ TRUNCATE TABLE
     station_inventory,
     items;
 
--- Keep personnel identities, but reset their operational state for this scenario.
+-- Ensure the standard demo roster exists while preserving any additional personnel.
+INSERT INTO personnel (personnel_code, full_name, role, medical_clearance_status, current_station_id, status)
+VALUES
+    ('PERS-001', 'Dr. Ananya Rao', 'Station Commander', 'cleared', (SELECT id FROM stations WHERE code = 'BHARTI'), 'available'),
+    ('PERS-002', 'Dr. Arjun Mehta', 'Glaciologist', 'cleared', (SELECT id FROM stations WHERE code = 'BHARTI'), 'available'),
+    ('PERS-003', 'Kavya Nair', 'Logistics Officer', 'cleared', (SELECT id FROM stations WHERE code = 'BHARTI'), 'available'),
+    ('PERS-004', 'Dr. Rohan Iyer', 'Station Commander', 'cleared', (SELECT id FROM stations WHERE code = 'MAITRI'), 'available'),
+    ('PERS-005', 'Neel Sharma', 'Communications Engineer', 'cleared', (SELECT id FROM stations WHERE code = 'MAITRI'), 'available')
+ON CONFLICT (personnel_code) DO UPDATE
+SET full_name = EXCLUDED.full_name,
+    role = EXCLUDED.role,
+    medical_clearance_status = EXCLUDED.medical_clearance_status;
+
+-- Reset standard-demo personnel operational state for this scenario.
 UPDATE personnel p
 SET current_station_id = CASE p.personnel_code
         WHEN 'PERS-002' THEN (SELECT id FROM stations WHERE code = 'INDIA-HQ')
@@ -36,7 +49,18 @@ SET current_station_id = CASE p.personnel_code
         WHEN 'PERS-002' THEN 'in_transit'
         WHEN 'PERS-003' THEN 'assigned'
         ELSE 'available'
-    END;
+    END
+WHERE p.personnel_code IN ('PERS-001', 'PERS-002', 'PERS-003', 'PERS-004', 'PERS-005');
+
+-- Keep the two additional test personnel available at their intended stations.
+UPDATE personnel p
+SET medical_clearance_status = 'cleared',
+    status = 'available',
+    current_station_id = CASE p.personnel_code
+        WHEN 'PERS-006' THEN (SELECT id FROM stations WHERE code = 'BHARTI')
+        WHEN 'PERS-007' THEN (SELECT id FROM stations WHERE code = 'MAITRI')
+    END
+WHERE p.personnel_code IN ('PERS-006', 'PERS-007');
 
 INSERT INTO expeditions (
     expedition_code, name, purpose, origin_station_id, destination_station_id,

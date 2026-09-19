@@ -48,6 +48,10 @@ func main() {
 	cfg := &APIConfig{database: queries}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
 	station.RegisterRoutes(mux, cfg.database)
 	personnel.RegisterRoutes(mux, cfg.database)
 	expedition.RegisterRoutes(mux, cfg.database)
@@ -55,12 +59,17 @@ func main() {
 	logistics.RegisterRoutes(mux, cfg.database)
 	emergency.RegisterRoutes(mux, cfg.database)
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + port,
 		Handler: mux,
 	}
 
-	log.Println("Starting server on http://localhost:8080")
+	log.Printf("Starting server on port %s", port)
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
