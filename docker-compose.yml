@@ -19,6 +19,20 @@ services:
     networks:
       - drishti_internal
 
+  # This service is intentionally behind the "tools" profile. It never starts
+  # with the API; invoke it explicitly to apply schema migrations.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    env_file:
+      - .env.production
+    profiles:
+      - tools
+    restart: "no"
+    networks:
+      - drishti_internal
+
   nginx:
     image: nginx:stable-alpine
     depends_on:

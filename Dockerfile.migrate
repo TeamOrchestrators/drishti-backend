@@ -1,0 +1,17 @@
+# Build Goose once so the EC2 host does not need Go or Goose installed.
+FROM golang:1.27.1-alpine AS goose-builder
+
+ARG GOOSE_VERSION=v3.24.1
+RUN go install github.com/pressly/goose/v3/cmd/goose@${GOOSE_VERSION}
+
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates
+COPY --from=goose-builder /go/bin/goose /usr/local/bin/goose
+COPY sql/migrations /migrations
+
+# GOOSE_DBSTRING is supplied only at runtime through .env.production. The
+# direct Neon URL is required because migrations should not use PgBouncer.
+ENV GOOSE_DRIVER=postgres
+ENTRYPOINT ["goose", "-dir", "/migrations"]
+CMD ["up"]
