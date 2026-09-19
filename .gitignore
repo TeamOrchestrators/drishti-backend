@@ -26,6 +26,8 @@ go.work.sum
 # env file
 .env
 .gocache/
+# The analytics source is deployed as a separately versioned repository.
+analytics/
 
 # Editor/IDE
 .idea/

@@ -2,6 +2,7 @@
 # data into an image.
 .git
 .env
+analytics
 backups
 resources
 demo-data

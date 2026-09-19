@@ -23,6 +23,26 @@ TRUNCATE TABLE
     station_inventory,
     items;
 
+-- A fresh database contains schema only. Ensure the station master data exists
+-- before later seed statements resolve station IDs by code.
+INSERT INTO stations (
+    code, name, station_type, latitude, longitude, personnel_capacity, notes
+)
+VALUES
+    ('BHARTI', 'Bharti Research Station', 'station', -69.408000, 76.192000, 47,
+     'Indian Antarctic research station and primary operations base.'),
+    ('MAITRI', 'Maitri Research Station', 'station', -70.766667, 11.733333, 65,
+     'Indian Antarctic research station supporting inland operations.'),
+    ('INDIA-HQ', 'India HQ', 'hub', 28.613900, 77.209000, 120,
+     'India-based coordination and departure hub.')
+ON CONFLICT (code) DO UPDATE
+SET name = EXCLUDED.name,
+    station_type = EXCLUDED.station_type,
+    latitude = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude,
+    personnel_capacity = EXCLUDED.personnel_capacity,
+    notes = EXCLUDED.notes;
+
 -- Ensure the standard demo roster exists while preserving any additional personnel.
 INSERT INTO personnel (personnel_code, full_name, role, medical_clearance_status, current_station_id, status)
 VALUES

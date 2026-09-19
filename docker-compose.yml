@@ -1,4 +1,21 @@
 services:
+  analytics:
+    # This directory is a separate Git repository cloned during deployment.
+    # Compose builds it into the same private network as the Go API.
+    build:
+      context: ./analytics
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - drishti_internal
+
   backend:
     build:
       context: .
@@ -7,6 +24,9 @@ services:
       - .env.production
     environment:
       PORT: "8080"
+    depends_on:
+      analytics:
+        condition: service_healthy
     expose:
       - "8080"
     restart: unless-stopped
