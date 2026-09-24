@@ -53,3 +53,78 @@ FROM logistics_batches b
 WHERE c.id = sqlc.arg(cargo_id) AND b.id = sqlc.arg(logistics_batch_id)
   AND b.status NOT IN ('received', 'cancelled')
 RETURNING c.*;
+
+-- name: GetCargoForQR :one
+SELECT c.id,
+       c.cargo_code,
+       COALESCE(origin.name, '') AS origin_station_name,
+       destination.name AS destination_station_name,
+       COALESCE(e.expedition_code, '') AS expedition_code,
+       COALESCE(e.name, '') AS expedition_name,
+       COALESCE(b.batch_code, '') AS logistics_batch_code,
+       c.priority,
+       c.status,
+       c.notes,
+       c.dispatched_at,
+       c.received_at,
+       c.created_at
+FROM cargo c
+LEFT JOIN stations origin ON origin.id = c.origin_station_id
+JOIN stations destination ON destination.id = c.destination_station_id
+LEFT JOIN expeditions e ON e.id = c.expedition_id
+LEFT JOIN logistics_batches b ON b.id = c.logistics_batch_id
+WHERE c.id = sqlc.arg(cargo_id);
+
+-- name: ListCargoItemsForQR :many
+SELECT i.id AS item_id,
+       i.item_code,
+       i.name AS item_name,
+       i.unit,
+       ci.quantity::DOUBLE PRECISION AS quantity,
+       COALESCE(ci.declared_weight_kg, 0)::DOUBLE PRECISION AS declared_weight_kg,
+       ci.notes
+FROM cargo_items ci
+JOIN items i ON i.id = ci.item_id
+WHERE ci.cargo_id = sqlc.arg(cargo_id)
+ORDER BY i.name ASC;
+
+-- name: ListCargoQRScans :many
+SELECT q.id,
+       q.event_type,
+       COALESCE(s.name, '') AS station_name,
+       COALESCE(p.full_name, '') AS scanned_by_personnel_name,
+       COALESCE(q.latitude, 0)::DOUBLE PRECISION AS latitude,
+       COALESCE(q.longitude, 0)::DOUBLE PRECISION AS longitude,
+       q.scanned_at,
+       q.notes
+FROM cargo_qr_scans q
+LEFT JOIN stations s ON s.id = q.station_id
+LEFT JOIN personnel p ON p.id = q.scanned_by_personnel_id
+WHERE q.cargo_id = sqlc.arg(cargo_id)
+ORDER BY q.scanned_at DESC;
+
+-- name: RecordCargoQRScan :one
+INSERT INTO cargo_qr_scans (
+    cargo_id, event_type, station_id, scanned_by_personnel_id,
+    latitude, longitude, notes
+)
+VALUES (
+    sqlc.arg(cargo_id), sqlc.arg(event_type), sqlc.narg(station_id),
+    sqlc.narg(scanned_by_personnel_id), sqlc.narg(latitude)::DOUBLE PRECISION,
+    sqlc.narg(longitude)::DOUBLE PRECISION, sqlc.narg(notes)
+)
+RETURNING id, scanned_at;
+
+-- name: UpdateCargoStatusFromQR :one
+UPDATE cargo
+SET status = sqlc.arg(status),
+    dispatched_at = CASE
+        WHEN sqlc.arg(status) IN ('dispatched', 'in_transit') THEN COALESCE(dispatched_at, NOW())
+        ELSE dispatched_at
+    END,
+    received_at = CASE
+        WHEN sqlc.arg(status) = 'received' THEN COALESCE(received_at, NOW())
+        ELSE received_at
+    END
+WHERE id = sqlc.arg(cargo_id)
+RETURNING id;

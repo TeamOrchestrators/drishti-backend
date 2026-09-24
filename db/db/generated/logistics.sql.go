@@ -145,6 +145,65 @@ func (q *Queries) CreateLogisticsBatch(ctx context.Context, arg CreateLogisticsB
 	return i, err
 }
 
+const getCargoForQR = `-- name: GetCargoForQR :one
+SELECT c.id,
+       c.cargo_code,
+       COALESCE(origin.name, '') AS origin_station_name,
+       destination.name AS destination_station_name,
+       COALESCE(e.expedition_code, '') AS expedition_code,
+       COALESCE(e.name, '') AS expedition_name,
+       COALESCE(b.batch_code, '') AS logistics_batch_code,
+       c.priority,
+       c.status,
+       c.notes,
+       c.dispatched_at,
+       c.received_at,
+       c.created_at
+FROM cargo c
+LEFT JOIN stations origin ON origin.id = c.origin_station_id
+JOIN stations destination ON destination.id = c.destination_station_id
+LEFT JOIN expeditions e ON e.id = c.expedition_id
+LEFT JOIN logistics_batches b ON b.id = c.logistics_batch_id
+WHERE c.id = $1
+`
+
+type GetCargoForQRRow struct {
+	ID                     pgtype.UUID        `json:"id"`
+	CargoCode              string             `json:"cargo_code"`
+	OriginStationName      string             `json:"origin_station_name"`
+	DestinationStationName string             `json:"destination_station_name"`
+	ExpeditionCode         string             `json:"expedition_code"`
+	ExpeditionName         string             `json:"expedition_name"`
+	LogisticsBatchCode     string             `json:"logistics_batch_code"`
+	Priority               string             `json:"priority"`
+	Status                 string             `json:"status"`
+	Notes                  *string            `json:"notes"`
+	DispatchedAt           pgtype.Timestamptz `json:"dispatched_at"`
+	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetCargoForQR(ctx context.Context, cargoID pgtype.UUID) (GetCargoForQRRow, error) {
+	row := q.db.QueryRow(ctx, getCargoForQR, cargoID)
+	var i GetCargoForQRRow
+	err := row.Scan(
+		&i.ID,
+		&i.CargoCode,
+		&i.OriginStationName,
+		&i.DestinationStationName,
+		&i.ExpeditionCode,
+		&i.ExpeditionName,
+		&i.LogisticsBatchCode,
+		&i.Priority,
+		&i.Status,
+		&i.Notes,
+		&i.DispatchedAt,
+		&i.ReceivedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listCargo = `-- name: ListCargo :many
 SELECT c.id, c.cargo_code, origin.name AS origin_station_name,
        destination.name AS destination_station_name, COALESCE(e.name, '') AS expedition_name,
@@ -187,6 +246,114 @@ func (q *Queries) ListCargo(ctx context.Context) ([]ListCargoRow, error) {
 			&i.LogisticsBatchCode,
 			&i.Priority,
 			&i.Status,
+			&i.Notes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCargoItemsForQR = `-- name: ListCargoItemsForQR :many
+SELECT i.id AS item_id,
+       i.item_code,
+       i.name AS item_name,
+       i.unit,
+       ci.quantity::DOUBLE PRECISION AS quantity,
+       COALESCE(ci.declared_weight_kg, 0)::DOUBLE PRECISION AS declared_weight_kg,
+       ci.notes
+FROM cargo_items ci
+JOIN items i ON i.id = ci.item_id
+WHERE ci.cargo_id = $1
+ORDER BY i.name ASC
+`
+
+type ListCargoItemsForQRRow struct {
+	ItemID           pgtype.UUID `json:"item_id"`
+	ItemCode         string      `json:"item_code"`
+	ItemName         string      `json:"item_name"`
+	Unit             string      `json:"unit"`
+	Quantity         float64     `json:"quantity"`
+	DeclaredWeightKg float64     `json:"declared_weight_kg"`
+	Notes            *string     `json:"notes"`
+}
+
+func (q *Queries) ListCargoItemsForQR(ctx context.Context, cargoID pgtype.UUID) ([]ListCargoItemsForQRRow, error) {
+	rows, err := q.db.Query(ctx, listCargoItemsForQR, cargoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCargoItemsForQRRow{}
+	for rows.Next() {
+		var i ListCargoItemsForQRRow
+		if err := rows.Scan(
+			&i.ItemID,
+			&i.ItemCode,
+			&i.ItemName,
+			&i.Unit,
+			&i.Quantity,
+			&i.DeclaredWeightKg,
+			&i.Notes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCargoQRScans = `-- name: ListCargoQRScans :many
+SELECT q.id,
+       q.event_type,
+       COALESCE(s.name, '') AS station_name,
+       COALESCE(p.full_name, '') AS scanned_by_personnel_name,
+       COALESCE(q.latitude, 0)::DOUBLE PRECISION AS latitude,
+       COALESCE(q.longitude, 0)::DOUBLE PRECISION AS longitude,
+       q.scanned_at,
+       q.notes
+FROM cargo_qr_scans q
+LEFT JOIN stations s ON s.id = q.station_id
+LEFT JOIN personnel p ON p.id = q.scanned_by_personnel_id
+WHERE q.cargo_id = $1
+ORDER BY q.scanned_at DESC
+`
+
+type ListCargoQRScansRow struct {
+	ID                     pgtype.UUID        `json:"id"`
+	EventType              string             `json:"event_type"`
+	StationName            string             `json:"station_name"`
+	ScannedByPersonnelName string             `json:"scanned_by_personnel_name"`
+	Latitude               float64            `json:"latitude"`
+	Longitude              float64            `json:"longitude"`
+	ScannedAt              pgtype.Timestamptz `json:"scanned_at"`
+	Notes                  *string            `json:"notes"`
+}
+
+func (q *Queries) ListCargoQRScans(ctx context.Context, cargoID pgtype.UUID) ([]ListCargoQRScansRow, error) {
+	rows, err := q.db.Query(ctx, listCargoQRScans, cargoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCargoQRScansRow{}
+	for rows.Next() {
+		var i ListCargoQRScansRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.StationName,
+			&i.ScannedByPersonnelName,
+			&i.Latitude,
+			&i.Longitude,
+			&i.ScannedAt,
 			&i.Notes,
 		); err != nil {
 			return nil, err
@@ -253,6 +420,76 @@ func (q *Queries) ListLogisticsBatches(ctx context.Context) ([]ListLogisticsBatc
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordCargoQRScan = `-- name: RecordCargoQRScan :one
+INSERT INTO cargo_qr_scans (
+    cargo_id, event_type, station_id, scanned_by_personnel_id,
+    latitude, longitude, notes
+)
+VALUES (
+    $1, $2, $3,
+    $4, $5::DOUBLE PRECISION,
+    $6::DOUBLE PRECISION, $7
+)
+RETURNING id, scanned_at
+`
+
+type RecordCargoQRScanParams struct {
+	CargoID              pgtype.UUID `json:"cargo_id"`
+	EventType            string      `json:"event_type"`
+	StationID            pgtype.UUID `json:"station_id"`
+	ScannedByPersonnelID pgtype.UUID `json:"scanned_by_personnel_id"`
+	Latitude             *float64    `json:"latitude"`
+	Longitude            *float64    `json:"longitude"`
+	Notes                *string     `json:"notes"`
+}
+
+type RecordCargoQRScanRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	ScannedAt pgtype.Timestamptz `json:"scanned_at"`
+}
+
+func (q *Queries) RecordCargoQRScan(ctx context.Context, arg RecordCargoQRScanParams) (RecordCargoQRScanRow, error) {
+	row := q.db.QueryRow(ctx, recordCargoQRScan,
+		arg.CargoID,
+		arg.EventType,
+		arg.StationID,
+		arg.ScannedByPersonnelID,
+		arg.Latitude,
+		arg.Longitude,
+		arg.Notes,
+	)
+	var i RecordCargoQRScanRow
+	err := row.Scan(&i.ID, &i.ScannedAt)
+	return i, err
+}
+
+const updateCargoStatusFromQR = `-- name: UpdateCargoStatusFromQR :one
+UPDATE cargo
+SET status = $1,
+    dispatched_at = CASE
+        WHEN $1 IN ('dispatched', 'in_transit') THEN COALESCE(dispatched_at, NOW())
+        ELSE dispatched_at
+    END,
+    received_at = CASE
+        WHEN $1 = 'received' THEN COALESCE(received_at, NOW())
+        ELSE received_at
+    END
+WHERE id = $2
+RETURNING id
+`
+
+type UpdateCargoStatusFromQRParams struct {
+	Status  string      `json:"status"`
+	CargoID pgtype.UUID `json:"cargo_id"`
+}
+
+func (q *Queries) UpdateCargoStatusFromQR(ctx context.Context, arg UpdateCargoStatusFromQRParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, updateCargoStatusFromQR, arg.Status, arg.CargoID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateLogisticsBatch = `-- name: UpdateLogisticsBatch :one

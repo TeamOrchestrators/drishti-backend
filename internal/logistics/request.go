@@ -36,3 +36,15 @@ type UpdateBatchRequest struct {
 type AssignCargoBatchRequest struct {
 	LogisticsBatchID uuid.UUID `json:"logistics_batch_id"`
 }
+
+// RecordCargoQRScanRequest is sent by a scanner after resolving a cargo QR token.
+// Status is optional so a lookup-only scan can be recorded without changing cargo state.
+type RecordCargoQRScanRequest struct {
+	EventType            string     `json:"event_type,omitempty"`
+	Status               string     `json:"status,omitempty"`
+	StationID            *uuid.UUID `json:"station_id,omitempty"`
+	ScannedByPersonnelID *uuid.UUID `json:"scanned_by_personnel_id,omitempty"`
+	Latitude             *float64   `json:"latitude,omitempty"`
+	Longitude            *float64   `json:"longitude,omitempty"`
+	Notes                string     `json:"notes,omitempty"`
+}

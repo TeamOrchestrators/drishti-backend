@@ -2,9 +2,11 @@ package logistics
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type Handler struct{ service *Service }
@@ -62,6 +64,46 @@ func (h *Handler) AssignCargo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) GetByQR(w http.ResponseWriter, r *http.Request) {
+	cargoID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid cargo QR token", http.StatusBadRequest)
+		return
+	}
+	response, err := h.service.GetByQR(r.Context(), cargoID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "cargo not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "could not retrieve cargo QR details", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) RecordQRScan(w http.ResponseWriter, r *http.Request) {
+	cargoID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid cargo QR token", http.StatusBadRequest)
+		return
+	}
+	var request RecordCargoQRScanRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	response, err := h.service.RecordQRScan(r.Context(), cargoID, request)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "cargo not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, value any) bool {
