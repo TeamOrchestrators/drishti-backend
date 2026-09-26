@@ -1,0 +1,42 @@
+Use case: infographic-diagram.
+Create a polished high-resolution slide-ready process/methodology infographic for DRISHTI, a polar expedition operations platform. Input image is STYLE AND LAYOUT reference only; replace its unrelated SOC content completely. Match its visual language very closely: white canvas, pale blue/mint/yellow/lavender/blush rounded panels with fine colored borders, dark navy arrows, tall condensed uppercase headings, dark gray condensed body type, large simple solid pictogram icons in coordinated saturated colors. Flat professional academic technical presentation aesthetic. No gradients, shadows, photos, watermark, or carousel UI. Landscape approximately 3:2, at least 2400px wide if possible. Clear typography readable when placed alongside slide text. Avoid excessive text.
+
+Title: "METHODOLOGY / PROCESS"
+Subtitle: "DRISHTI — Coordinated Polar Expedition Operations"
+
+Layout: Main upper row with five numbered panels. Panel 4 wider than others and dashed lavender border with 2x2 internal tiles, like the reference. Sequential navy arrows 1 → 2 → 3 → 4 → 5. Panels 1,2,3,5 tall, with centered icon above short body text.
+1 pale blue, heading "1. OPERATIONAL DATA", database-and-document icon.
+Body: "Station records, personnel, expedition plans, inventory and cargo."
+Small footer: "Web interface • Mobile SOS simulation"
+2 mint, heading "2. INGEST & VALIDATE", document checkmark icon.
+Body: "Go API validates JSON, required fields and operational rules."
+3 pale yellow, heading "3. STRUCTURED STORAGE", database gear icon.
+Body: "PostgreSQL stores linked records and stock transactions."
+Small footer: "SQLC queries • Goose migrations"
+4 lavender dashed outer container heading "4. OPERATIONS ENGINE".
+Four pastel internal tiles, each with clear icon and two short lines:
+"Expedition Planning" / "Schedules & assignments" (calendar icon)
+"Personnel Movement" / "Availability & movement history" (people icon)
+"Cargo Logistics" / "QR-linked cargo & batches" (package QR icon)
+"Emergency Response" / "GPS heartbeats & confirmed SOS" (location alert icon)
+5 pale blue heading "5. UNIFIED DASHBOARD", monitor with chart icon.
+Body: "View station status, operational records and inventory insights."
+Small footer: "ReactJS + Vite"
+
+Bottom row: a wide panel 6 occupying left 60%, and panel 7 occupying right 35%. Generous space between top and bottom rows for labeled connectors.
+6 heading "6. INVENTORY ANALYTICS", dashed lavender outer frame like the reference central engine.
+Subheading "Python • FastAPI • Pandas • NumPy"
+Four compact pastel internal tiles in a single row with simple chart icons:
+"Stock Days" / "Remaining supply"
+"Depletion Estimate" / "Expected stock-out"
+"Anomaly Detection" / "Unusual consumption"
+"Consumption Trends" / "Average daily usage"
+7 pale mint heading "7. COORDINATED ACTION", human-and-checkmark icon.
+Body: "Review alerts, plan resupply, coordinate teams and respond to emergencies."
+
+Connections must reflect the actual parallel workflow:
+From bottom of panel 3 draw a downward navy arrow to panel 6, labeled "Inventory & consumption history".
+From panel 6 right edge draw right-facing navy arrow into panel 7, label "Insights & alerts".
+From panel 5 bottom draw downward navy arrow into panel 7, label "Operational status".
+Add small unobtrusive note below analytics panel: "Analytics results return through the Go API to the dashboard."
+Do not suggest all domain records go through inventory analytics. No machine-learning training pipeline, satellite connections, vehicle tracking, authentication or invented capabilities. Keep typography sharp and exact. All spelling correct. White background, balanced margins, visually very close to attached reference.

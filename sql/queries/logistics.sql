@@ -61,6 +61,7 @@ SELECT c.id,
        destination.name AS destination_station_name,
        COALESCE(e.expedition_code, '') AS expedition_code,
        COALESCE(e.name, '') AS expedition_name,
+       c.logistics_batch_id,
        COALESCE(b.batch_code, '') AS logistics_batch_code,
        c.priority,
        c.status,
@@ -103,28 +104,82 @@ LEFT JOIN personnel p ON p.id = q.scanned_by_personnel_id
 WHERE q.cargo_id = sqlc.arg(cargo_id)
 ORDER BY q.scanned_at DESC;
 
--- name: RecordCargoQRScan :one
-INSERT INTO cargo_qr_scans (
-    cargo_id, event_type, station_id, scanned_by_personnel_id,
-    latitude, longitude, notes
+-- name: RecordCargoQRCheckpoint :one
+WITH source AS (
+    SELECT logistics_batch_id
+    FROM cargo
+    WHERE id = sqlc.arg(cargo_id)
+), requested_update AS (
+    SELECT sqlc.narg(status)::TEXT AS status
+), targets AS (
+    SELECT c.id
+    FROM cargo c
+    CROSS JOIN source s
+    WHERE (NOT sqlc.arg(apply_to_batch)::BOOLEAN AND c.id = sqlc.arg(cargo_id))
+       OR (sqlc.arg(apply_to_batch)::BOOLEAN AND c.logistics_batch_id = s.logistics_batch_id)
+), updated AS (
+    UPDATE cargo c
+    SET status = COALESCE(requested_update.status, c.status),
+        dispatched_at = CASE
+            WHEN requested_update.status IN ('dispatched', 'in_transit') THEN COALESCE(c.dispatched_at, NOW())
+            ELSE c.dispatched_at
+        END,
+        received_at = CASE
+            WHEN requested_update.status = 'received' THEN COALESCE(c.received_at, NOW())
+            ELSE c.received_at
+        END
+    FROM requested_update
+    WHERE c.id IN (SELECT id FROM targets)
+      AND requested_update.status IS NOT NULL
+      AND c.status NOT IN ('received', 'cancelled')
+    RETURNING c.id
+), scans AS (
+    INSERT INTO cargo_qr_scans (
+        cargo_id, event_type, station_id, scanned_by_personnel_id,
+        latitude, longitude, notes
+    )
+    SELECT target.id, sqlc.arg(event_type), sqlc.narg(station_id),
+           sqlc.narg(scanned_by_personnel_id), sqlc.arg(latitude)::DOUBLE PRECISION,
+           sqlc.arg(longitude)::DOUBLE PRECISION, sqlc.narg(notes)
+    FROM targets target
+    RETURNING id, cargo_id, scanned_at
 )
-VALUES (
-    sqlc.arg(cargo_id), sqlc.arg(event_type), sqlc.narg(station_id),
-    sqlc.narg(scanned_by_personnel_id), sqlc.narg(latitude)::DOUBLE PRECISION,
-    sqlc.narg(longitude)::DOUBLE PRECISION, sqlc.narg(notes)
-)
-RETURNING id, scanned_at;
+SELECT (SELECT id FROM scans WHERE cargo_id = sqlc.arg(cargo_id) LIMIT 1) AS scan_id,
+       (SELECT scanned_at FROM scans WHERE cargo_id = sqlc.arg(cargo_id) LIMIT 1) AS scanned_at,
+       (SELECT COUNT(*)::INTEGER FROM scans) AS affected_cargo_count,
+       (SELECT COUNT(*)::INTEGER FROM updated) AS status_updated_count;
 
--- name: UpdateCargoStatusFromQR :one
-UPDATE cargo
-SET status = sqlc.arg(status),
-    dispatched_at = CASE
-        WHEN sqlc.arg(status) IN ('dispatched', 'in_transit') THEN COALESCE(dispatched_at, NOW())
-        ELSE dispatched_at
-    END,
-    received_at = CASE
-        WHEN sqlc.arg(status) = 'received' THEN COALESCE(received_at, NOW())
-        ELSE received_at
-    END
-WHERE id = sqlc.arg(cargo_id)
-RETURNING id;
+-- name: GetLogisticsBatchTracking :one
+SELECT b.id,
+       b.batch_code,
+       b.status,
+       e.expedition_code,
+       e.name AS expedition_name,
+       origin.name AS origin_station_name,
+       destination.name AS destination_station_name,
+       COUNT(c.id)::INTEGER AS cargo_count
+FROM logistics_batches b
+JOIN expeditions e ON e.id = b.expedition_id
+JOIN stations origin ON origin.id = b.origin_station_id
+JOIN stations destination ON destination.id = b.destination_station_id
+LEFT JOIN cargo c ON c.logistics_batch_id = b.id
+WHERE b.id = sqlc.arg(logistics_batch_id)
+GROUP BY b.id, e.expedition_code, e.name, origin.name, destination.name;
+
+-- name: ListLogisticsBatchCheckpointPoints :many
+SELECT DISTINCT ON (scan.scanned_at, scan.latitude, scan.longitude, scan.event_type)
+       scan.id,
+       scan.event_type,
+       scan.latitude::DOUBLE PRECISION AS latitude,
+       scan.longitude::DOUBLE PRECISION AS longitude,
+       scan.scanned_at,
+       scan.notes,
+       COUNT(*) OVER (
+           PARTITION BY scan.scanned_at, scan.latitude, scan.longitude, scan.event_type
+       )::INTEGER AS affected_cargo_count
+FROM cargo_qr_scans scan
+JOIN cargo c ON c.id = scan.cargo_id
+WHERE c.logistics_batch_id = sqlc.arg(logistics_batch_id)
+  AND scan.latitude IS NOT NULL
+  AND scan.longitude IS NOT NULL
+ORDER BY scan.scanned_at DESC, scan.latitude, scan.longitude, scan.event_type;

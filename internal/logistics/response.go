@@ -72,6 +72,7 @@ type CargoQRDetailResponse struct {
 	DestinationStationName string                `json:"destination_station_name"`
 	ExpeditionCode         string                `json:"expedition_code"`
 	ExpeditionName         string                `json:"expedition_name"`
+	LogisticsBatchID       *string               `json:"logistics_batch_id,omitempty"`
 	LogisticsBatchCode     string                `json:"logistics_batch_code"`
 	Priority               string                `json:"priority"`
 	Status                 string                `json:"status"`
@@ -84,10 +85,37 @@ type CargoQRDetailResponse struct {
 }
 
 type RecordCargoQRScanResponse struct {
-	Status      bool      `json:"status"`
-	Message     string    `json:"message"`
-	ScanID      string    `json:"scan_id"`
-	CargoID     string    `json:"cargo_id"`
-	CargoStatus string    `json:"cargo_status"`
-	ScannedAt   time.Time `json:"scanned_at"`
+	Status             bool      `json:"status"`
+	Message            string    `json:"message"`
+	ScanID             string    `json:"scan_id"`
+	CargoID            string    `json:"cargo_id"`
+	CargoStatus        string    `json:"cargo_status"`
+	ScannedAt          time.Time `json:"scanned_at"`
+	AppliedToBatch     bool      `json:"applied_to_batch"`
+	AffectedCargoCount int       `json:"affected_cargo_count"`
+	StatusUpdatedCount int       `json:"status_updated_count"`
+	LogisticsBatchID   *string   `json:"logistics_batch_id,omitempty"`
+	LogisticsBatchCode string    `json:"logistics_batch_code"`
+}
+
+type LogisticsBatchCheckpointPoint struct {
+	ID                 string    `json:"id"`
+	EventType          string    `json:"event_type"`
+	Latitude           float64   `json:"latitude"`
+	Longitude          float64   `json:"longitude"`
+	ScannedAt          time.Time `json:"scanned_at"`
+	Notes              *string   `json:"notes,omitempty"`
+	AffectedCargoCount int       `json:"affected_cargo_count"`
+}
+
+type LogisticsBatchTrackingResponse struct {
+	ID                     string                          `json:"id"`
+	BatchCode              string                          `json:"batch_code"`
+	Status                 string                          `json:"status"`
+	ExpeditionCode         string                          `json:"expedition_code"`
+	ExpeditionName         string                          `json:"expedition_name"`
+	OriginStationName      string                          `json:"origin_station_name"`
+	DestinationStationName string                          `json:"destination_station_name"`
+	CargoCount             int                             `json:"cargo_count"`
+	Checkpoints            []LogisticsBatchCheckpointPoint `json:"checkpoints"`
 }

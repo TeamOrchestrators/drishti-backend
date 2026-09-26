@@ -106,6 +106,24 @@ func (h *Handler) RecordQRScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, response)
 }
 
+func (h *Handler) GetBatchTracking(w http.ResponseWriter, r *http.Request) {
+	batchID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid logistics batch id", http.StatusBadRequest)
+		return
+	}
+	response, err := h.service.GetBatchTracking(r.Context(), batchID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "logistics batch not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "could not retrieve logistics batch tracking", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()

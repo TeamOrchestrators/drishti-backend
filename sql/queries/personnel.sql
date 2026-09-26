@@ -154,3 +154,119 @@ WITH valid_assignment AS (
 SELECT movement.id
 FROM movement
 CROSS JOIN updated_personnel;
+
+-- name: GetPersonnelDetailProfile :one
+SELECT p.id AS personnel_id,
+       p.personnel_code,
+       p.full_name,
+       p.role,
+       p.medical_clearance_status,
+       p.status AS personnel_status,
+       COALESCE(station.name, '') AS current_station_name,
+       device.id AS device_id,
+       device.device_label,
+       device.status AS device_status,
+       device.last_heartbeat_at,
+       COALESCE(device.last_latitude, 0)::DOUBLE PRECISION AS last_latitude,
+       COALESCE(device.last_longitude, 0)::DOUBLE PRECISION AS last_longitude,
+       COALESCE(device.last_accuracy_m, 0)::DOUBLE PRECISION AS last_accuracy_m,
+       COALESCE(device.last_altitude_m, 0)::DOUBLE PRECISION AS last_altitude_m,
+       COALESCE(device.last_heading_deg, 0)::DOUBLE PRECISION AS last_heading_deg,
+       COALESCE(device.last_speed_mps, 0)::DOUBLE PRECISION AS last_speed_mps,
+       COALESCE(device.last_battery_percent, 0)::DOUBLE PRECISION AS last_battery_percent
+FROM personnel p
+LEFT JOIN stations station ON station.id = p.current_station_id
+LEFT JOIN emergency_devices device ON device.personnel_id = p.id
+WHERE p.id = sqlc.arg(personnel_id);
+
+-- name: GetPersonnelActiveMovement :one
+SELECT m.id,
+       m.movement_type,
+       COALESCE(origin.name, '') AS origin_station_name,
+       COALESCE(destination.name, '') AS destination_station_name,
+       m.status,
+       m.departed_at,
+       m.estimated_arrival_at,
+       COALESCE(e.expedition_code, '') AS expedition_code,
+       COALESCE(e.name, '') AS expedition_name
+FROM personnel_movements m
+LEFT JOIN stations origin ON origin.id = m.origin_station_id
+LEFT JOIN stations destination ON destination.id = m.destination_station_id
+LEFT JOIN expeditions e ON e.id = m.expedition_id
+WHERE m.personnel_id = sqlc.arg(personnel_id)
+  AND m.status IN ('planned', 'in_transit')
+ORDER BY m.created_at DESC
+LIMIT 1;
+
+-- name: ListPersonnelMovementTimeline :many
+SELECT m.id,
+       m.movement_type,
+       COALESCE(origin.name, '') AS origin_station_name,
+       COALESCE(destination.name, '') AS destination_station_name,
+       m.status,
+       m.departed_at,
+       m.estimated_arrival_at,
+       m.arrived_at,
+       m.notes,
+       COALESCE(e.expedition_code, '') AS expedition_code,
+       COALESCE(e.name, '') AS expedition_name
+FROM personnel_movements m
+LEFT JOIN stations origin ON origin.id = m.origin_station_id
+LEFT JOIN stations destination ON destination.id = m.destination_station_id
+LEFT JOIN expeditions e ON e.id = m.expedition_id
+WHERE m.personnel_id = sqlc.arg(personnel_id)
+ORDER BY COALESCE(m.arrived_at, m.departed_at, m.created_at) DESC;
+
+-- name: ListPersonnelExpeditionAssignments :many
+SELECT e.id AS expedition_id,
+       e.expedition_code,
+       e.name AS expedition_name,
+       e.status AS expedition_status,
+       member.assignment_role,
+       member.assigned_at,
+       member.released_at,
+       COALESCE(origin.name, '') AS origin_station_name,
+       COALESCE(destination.name, '') AS destination_station_name
+FROM expedition_members member
+JOIN expeditions e ON e.id = member.expedition_id
+LEFT JOIN stations origin ON origin.id = e.origin_station_id
+LEFT JOIN stations destination ON destination.id = e.destination_station_id
+WHERE member.personnel_id = sqlc.arg(personnel_id)
+ORDER BY member.released_at NULLS FIRST, member.assigned_at DESC;
+
+-- name: ListPersonnelEmergencies :many
+SELECT e.id AS emergency_id,
+       e.emergency_code,
+       e.emergency_type,
+       e.severity,
+       e.status AS emergency_status,
+       e.summary,
+       e.reported_at,
+       e.resolved_at,
+       COALESCE(CASE
+           WHEN e.reported_by_personnel_id = sqlc.arg(personnel_id) THEN 'reported'
+           ELSE involvement.involvement_type
+       END, '')::TEXT AS involvement_type
+FROM emergencies e
+LEFT JOIN emergency_personnel involvement
+       ON involvement.emergency_id = e.id
+      AND involvement.personnel_id = sqlc.arg(personnel_id)
+WHERE e.reported_by_personnel_id = sqlc.arg(personnel_id)
+   OR involvement.personnel_id = sqlc.arg(personnel_id)
+ORDER BY e.reported_at DESC;
+
+-- name: ListPersonnelLocationHistory :many
+SELECT signal.id,
+       signal.signal_type,
+       COALESCE(signal.latitude, 0)::DOUBLE PRECISION AS latitude,
+       COALESCE(signal.longitude, 0)::DOUBLE PRECISION AS longitude,
+       COALESCE(signal.location_accuracy_m, 0)::DOUBLE PRECISION AS location_accuracy_m,
+       COALESCE(signal.heading_deg, 0)::DOUBLE PRECISION AS heading_deg,
+       COALESCE(signal.speed_mps, 0)::DOUBLE PRECISION AS speed_mps,
+       COALESCE(signal.battery_percent, 0)::DOUBLE PRECISION AS battery_percent,
+       signal.occurred_at
+FROM emergency_signals signal
+WHERE signal.personnel_id = sqlc.arg(personnel_id)
+  AND signal.signal_type IN ('heartbeat', 'location_update', 'sos')
+ORDER BY signal.occurred_at DESC
+LIMIT 30;

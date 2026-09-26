@@ -120,6 +120,127 @@ func (q *Queries) AssignPersonnelToExpedition(ctx context.Context, arg AssignPer
 	return id, err
 }
 
+const getPersonnelActiveMovement = `-- name: GetPersonnelActiveMovement :one
+SELECT m.id,
+       m.movement_type,
+       COALESCE(origin.name, '') AS origin_station_name,
+       COALESCE(destination.name, '') AS destination_station_name,
+       m.status,
+       m.departed_at,
+       m.estimated_arrival_at,
+       COALESCE(e.expedition_code, '') AS expedition_code,
+       COALESCE(e.name, '') AS expedition_name
+FROM personnel_movements m
+LEFT JOIN stations origin ON origin.id = m.origin_station_id
+LEFT JOIN stations destination ON destination.id = m.destination_station_id
+LEFT JOIN expeditions e ON e.id = m.expedition_id
+WHERE m.personnel_id = $1
+  AND m.status IN ('planned', 'in_transit')
+ORDER BY m.created_at DESC
+LIMIT 1
+`
+
+type GetPersonnelActiveMovementRow struct {
+	ID                     pgtype.UUID        `json:"id"`
+	MovementType           string             `json:"movement_type"`
+	OriginStationName      string             `json:"origin_station_name"`
+	DestinationStationName string             `json:"destination_station_name"`
+	Status                 string             `json:"status"`
+	DepartedAt             pgtype.Timestamptz `json:"departed_at"`
+	EstimatedArrivalAt     pgtype.Timestamptz `json:"estimated_arrival_at"`
+	ExpeditionCode         string             `json:"expedition_code"`
+	ExpeditionName         string             `json:"expedition_name"`
+}
+
+func (q *Queries) GetPersonnelActiveMovement(ctx context.Context, personnelID pgtype.UUID) (GetPersonnelActiveMovementRow, error) {
+	row := q.db.QueryRow(ctx, getPersonnelActiveMovement, personnelID)
+	var i GetPersonnelActiveMovementRow
+	err := row.Scan(
+		&i.ID,
+		&i.MovementType,
+		&i.OriginStationName,
+		&i.DestinationStationName,
+		&i.Status,
+		&i.DepartedAt,
+		&i.EstimatedArrivalAt,
+		&i.ExpeditionCode,
+		&i.ExpeditionName,
+	)
+	return i, err
+}
+
+const getPersonnelDetailProfile = `-- name: GetPersonnelDetailProfile :one
+SELECT p.id AS personnel_id,
+       p.personnel_code,
+       p.full_name,
+       p.role,
+       p.medical_clearance_status,
+       p.status AS personnel_status,
+       COALESCE(station.name, '') AS current_station_name,
+       device.id AS device_id,
+       device.device_label,
+       device.status AS device_status,
+       device.last_heartbeat_at,
+       COALESCE(device.last_latitude, 0)::DOUBLE PRECISION AS last_latitude,
+       COALESCE(device.last_longitude, 0)::DOUBLE PRECISION AS last_longitude,
+       COALESCE(device.last_accuracy_m, 0)::DOUBLE PRECISION AS last_accuracy_m,
+       COALESCE(device.last_altitude_m, 0)::DOUBLE PRECISION AS last_altitude_m,
+       COALESCE(device.last_heading_deg, 0)::DOUBLE PRECISION AS last_heading_deg,
+       COALESCE(device.last_speed_mps, 0)::DOUBLE PRECISION AS last_speed_mps,
+       COALESCE(device.last_battery_percent, 0)::DOUBLE PRECISION AS last_battery_percent
+FROM personnel p
+LEFT JOIN stations station ON station.id = p.current_station_id
+LEFT JOIN emergency_devices device ON device.personnel_id = p.id
+WHERE p.id = $1
+`
+
+type GetPersonnelDetailProfileRow struct {
+	PersonnelID            pgtype.UUID        `json:"personnel_id"`
+	PersonnelCode          string             `json:"personnel_code"`
+	FullName               string             `json:"full_name"`
+	Role                   string             `json:"role"`
+	MedicalClearanceStatus string             `json:"medical_clearance_status"`
+	PersonnelStatus        string             `json:"personnel_status"`
+	CurrentStationName     string             `json:"current_station_name"`
+	DeviceID               pgtype.UUID        `json:"device_id"`
+	DeviceLabel            *string            `json:"device_label"`
+	DeviceStatus           *string            `json:"device_status"`
+	LastHeartbeatAt        pgtype.Timestamptz `json:"last_heartbeat_at"`
+	LastLatitude           float64            `json:"last_latitude"`
+	LastLongitude          float64            `json:"last_longitude"`
+	LastAccuracyM          float64            `json:"last_accuracy_m"`
+	LastAltitudeM          float64            `json:"last_altitude_m"`
+	LastHeadingDeg         float64            `json:"last_heading_deg"`
+	LastSpeedMps           float64            `json:"last_speed_mps"`
+	LastBatteryPercent     float64            `json:"last_battery_percent"`
+}
+
+func (q *Queries) GetPersonnelDetailProfile(ctx context.Context, personnelID pgtype.UUID) (GetPersonnelDetailProfileRow, error) {
+	row := q.db.QueryRow(ctx, getPersonnelDetailProfile, personnelID)
+	var i GetPersonnelDetailProfileRow
+	err := row.Scan(
+		&i.PersonnelID,
+		&i.PersonnelCode,
+		&i.FullName,
+		&i.Role,
+		&i.MedicalClearanceStatus,
+		&i.PersonnelStatus,
+		&i.CurrentStationName,
+		&i.DeviceID,
+		&i.DeviceLabel,
+		&i.DeviceStatus,
+		&i.LastHeartbeatAt,
+		&i.LastLatitude,
+		&i.LastLongitude,
+		&i.LastAccuracyM,
+		&i.LastAltitudeM,
+		&i.LastHeadingDeg,
+		&i.LastSpeedMps,
+		&i.LastBatteryPercent,
+	)
+	return i, err
+}
+
 const listActivePersonnel = `-- name: ListActivePersonnel :many
 SELECT id,
        personnel_code,
@@ -399,6 +520,255 @@ func (q *Queries) ListPersonnel(ctx context.Context) ([]ListPersonnelRow, error)
 			&i.Role,
 			&i.CurrentStation,
 			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPersonnelEmergencies = `-- name: ListPersonnelEmergencies :many
+SELECT e.id AS emergency_id,
+       e.emergency_code,
+       e.emergency_type,
+       e.severity,
+       e.status AS emergency_status,
+       e.summary,
+       e.reported_at,
+       e.resolved_at,
+       COALESCE(CASE
+           WHEN e.reported_by_personnel_id = $1 THEN 'reported'
+           ELSE involvement.involvement_type
+       END, '')::TEXT AS involvement_type
+FROM emergencies e
+LEFT JOIN emergency_personnel involvement
+       ON involvement.emergency_id = e.id
+      AND involvement.personnel_id = $1
+WHERE e.reported_by_personnel_id = $1
+   OR involvement.personnel_id = $1
+ORDER BY e.reported_at DESC
+`
+
+type ListPersonnelEmergenciesRow struct {
+	EmergencyID     pgtype.UUID        `json:"emergency_id"`
+	EmergencyCode   string             `json:"emergency_code"`
+	EmergencyType   string             `json:"emergency_type"`
+	Severity        string             `json:"severity"`
+	EmergencyStatus string             `json:"emergency_status"`
+	Summary         string             `json:"summary"`
+	ReportedAt      pgtype.Timestamptz `json:"reported_at"`
+	ResolvedAt      pgtype.Timestamptz `json:"resolved_at"`
+	InvolvementType string             `json:"involvement_type"`
+}
+
+func (q *Queries) ListPersonnelEmergencies(ctx context.Context, personnelID pgtype.UUID) ([]ListPersonnelEmergenciesRow, error) {
+	rows, err := q.db.Query(ctx, listPersonnelEmergencies, personnelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPersonnelEmergenciesRow{}
+	for rows.Next() {
+		var i ListPersonnelEmergenciesRow
+		if err := rows.Scan(
+			&i.EmergencyID,
+			&i.EmergencyCode,
+			&i.EmergencyType,
+			&i.Severity,
+			&i.EmergencyStatus,
+			&i.Summary,
+			&i.ReportedAt,
+			&i.ResolvedAt,
+			&i.InvolvementType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPersonnelExpeditionAssignments = `-- name: ListPersonnelExpeditionAssignments :many
+SELECT e.id AS expedition_id,
+       e.expedition_code,
+       e.name AS expedition_name,
+       e.status AS expedition_status,
+       member.assignment_role,
+       member.assigned_at,
+       member.released_at,
+       COALESCE(origin.name, '') AS origin_station_name,
+       COALESCE(destination.name, '') AS destination_station_name
+FROM expedition_members member
+JOIN expeditions e ON e.id = member.expedition_id
+LEFT JOIN stations origin ON origin.id = e.origin_station_id
+LEFT JOIN stations destination ON destination.id = e.destination_station_id
+WHERE member.personnel_id = $1
+ORDER BY member.released_at NULLS FIRST, member.assigned_at DESC
+`
+
+type ListPersonnelExpeditionAssignmentsRow struct {
+	ExpeditionID           pgtype.UUID        `json:"expedition_id"`
+	ExpeditionCode         string             `json:"expedition_code"`
+	ExpeditionName         string             `json:"expedition_name"`
+	ExpeditionStatus       string             `json:"expedition_status"`
+	AssignmentRole         *string            `json:"assignment_role"`
+	AssignedAt             pgtype.Timestamptz `json:"assigned_at"`
+	ReleasedAt             pgtype.Timestamptz `json:"released_at"`
+	OriginStationName      string             `json:"origin_station_name"`
+	DestinationStationName string             `json:"destination_station_name"`
+}
+
+func (q *Queries) ListPersonnelExpeditionAssignments(ctx context.Context, personnelID pgtype.UUID) ([]ListPersonnelExpeditionAssignmentsRow, error) {
+	rows, err := q.db.Query(ctx, listPersonnelExpeditionAssignments, personnelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPersonnelExpeditionAssignmentsRow{}
+	for rows.Next() {
+		var i ListPersonnelExpeditionAssignmentsRow
+		if err := rows.Scan(
+			&i.ExpeditionID,
+			&i.ExpeditionCode,
+			&i.ExpeditionName,
+			&i.ExpeditionStatus,
+			&i.AssignmentRole,
+			&i.AssignedAt,
+			&i.ReleasedAt,
+			&i.OriginStationName,
+			&i.DestinationStationName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPersonnelLocationHistory = `-- name: ListPersonnelLocationHistory :many
+SELECT signal.id,
+       signal.signal_type,
+       COALESCE(signal.latitude, 0)::DOUBLE PRECISION AS latitude,
+       COALESCE(signal.longitude, 0)::DOUBLE PRECISION AS longitude,
+       COALESCE(signal.location_accuracy_m, 0)::DOUBLE PRECISION AS location_accuracy_m,
+       COALESCE(signal.heading_deg, 0)::DOUBLE PRECISION AS heading_deg,
+       COALESCE(signal.speed_mps, 0)::DOUBLE PRECISION AS speed_mps,
+       COALESCE(signal.battery_percent, 0)::DOUBLE PRECISION AS battery_percent,
+       signal.occurred_at
+FROM emergency_signals signal
+WHERE signal.personnel_id = $1
+  AND signal.signal_type IN ('heartbeat', 'location_update', 'sos')
+ORDER BY signal.occurred_at DESC
+LIMIT 30
+`
+
+type ListPersonnelLocationHistoryRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	SignalType        string             `json:"signal_type"`
+	Latitude          float64            `json:"latitude"`
+	Longitude         float64            `json:"longitude"`
+	LocationAccuracyM float64            `json:"location_accuracy_m"`
+	HeadingDeg        float64            `json:"heading_deg"`
+	SpeedMps          float64            `json:"speed_mps"`
+	BatteryPercent    float64            `json:"battery_percent"`
+	OccurredAt        pgtype.Timestamptz `json:"occurred_at"`
+}
+
+func (q *Queries) ListPersonnelLocationHistory(ctx context.Context, personnelID pgtype.UUID) ([]ListPersonnelLocationHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listPersonnelLocationHistory, personnelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPersonnelLocationHistoryRow{}
+	for rows.Next() {
+		var i ListPersonnelLocationHistoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SignalType,
+			&i.Latitude,
+			&i.Longitude,
+			&i.LocationAccuracyM,
+			&i.HeadingDeg,
+			&i.SpeedMps,
+			&i.BatteryPercent,
+			&i.OccurredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPersonnelMovementTimeline = `-- name: ListPersonnelMovementTimeline :many
+SELECT m.id,
+       m.movement_type,
+       COALESCE(origin.name, '') AS origin_station_name,
+       COALESCE(destination.name, '') AS destination_station_name,
+       m.status,
+       m.departed_at,
+       m.estimated_arrival_at,
+       m.arrived_at,
+       m.notes,
+       COALESCE(e.expedition_code, '') AS expedition_code,
+       COALESCE(e.name, '') AS expedition_name
+FROM personnel_movements m
+LEFT JOIN stations origin ON origin.id = m.origin_station_id
+LEFT JOIN stations destination ON destination.id = m.destination_station_id
+LEFT JOIN expeditions e ON e.id = m.expedition_id
+WHERE m.personnel_id = $1
+ORDER BY COALESCE(m.arrived_at, m.departed_at, m.created_at) DESC
+`
+
+type ListPersonnelMovementTimelineRow struct {
+	ID                     pgtype.UUID        `json:"id"`
+	MovementType           string             `json:"movement_type"`
+	OriginStationName      string             `json:"origin_station_name"`
+	DestinationStationName string             `json:"destination_station_name"`
+	Status                 string             `json:"status"`
+	DepartedAt             pgtype.Timestamptz `json:"departed_at"`
+	EstimatedArrivalAt     pgtype.Timestamptz `json:"estimated_arrival_at"`
+	ArrivedAt              pgtype.Timestamptz `json:"arrived_at"`
+	Notes                  *string            `json:"notes"`
+	ExpeditionCode         string             `json:"expedition_code"`
+	ExpeditionName         string             `json:"expedition_name"`
+}
+
+func (q *Queries) ListPersonnelMovementTimeline(ctx context.Context, personnelID pgtype.UUID) ([]ListPersonnelMovementTimelineRow, error) {
+	rows, err := q.db.Query(ctx, listPersonnelMovementTimeline, personnelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPersonnelMovementTimelineRow{}
+	for rows.Next() {
+		var i ListPersonnelMovementTimelineRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MovementType,
+			&i.OriginStationName,
+			&i.DestinationStationName,
+			&i.Status,
+			&i.DepartedAt,
+			&i.EstimatedArrivalAt,
+			&i.ArrivedAt,
+			&i.Notes,
+			&i.ExpeditionCode,
+			&i.ExpeditionName,
 		); err != nil {
 			return nil, err
 		}

@@ -9,6 +9,7 @@ import (
 func RegisterRoutes(mux *http.ServeMux, queries *db.Queries) {
 	handler := NewHandler(NewService(queries))
 	mux.HandleFunc("GET /api/personnel", handler.List)
+	mux.HandleFunc("GET /api/personnel/{id}", handler.Detail)
 	mux.HandleFunc("GET /api/personnel/assignment-form-options", handler.AssignmentFormOptions)
 	mux.HandleFunc("POST /api/personnel/expedition-assignment", handler.AddToExpedition)
 }

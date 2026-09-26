@@ -2,11 +2,13 @@ package personnel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	db "github.com/TeamOrchestrators/drishti-backend/db/db/generated"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -111,6 +113,106 @@ func (s *Service) AssignmentFormOptions(ctx context.Context) (AssignmentFormOpti
 	return response, nil
 }
 
+func (s *Service) Detail(ctx context.Context, personnelID uuid.UUID) (PersonnelDetailResponse, error) {
+	profile, err := s.queries.GetPersonnelDetailProfile(ctx, uuidToPgtype(personnelID))
+	if err != nil {
+		return PersonnelDetailResponse{}, fmt.Errorf("get personnel profile: %w", err)
+	}
+	movements, err := s.queries.ListPersonnelMovementTimeline(ctx, uuidToPgtype(personnelID))
+	if err != nil {
+		return PersonnelDetailResponse{}, fmt.Errorf("list personnel movement timeline: %w", err)
+	}
+	assignments, err := s.queries.ListPersonnelExpeditionAssignments(ctx, uuidToPgtype(personnelID))
+	if err != nil {
+		return PersonnelDetailResponse{}, fmt.Errorf("list personnel expedition assignments: %w", err)
+	}
+	emergencies, err := s.queries.ListPersonnelEmergencies(ctx, uuidToPgtype(personnelID))
+	if err != nil {
+		return PersonnelDetailResponse{}, fmt.Errorf("list personnel emergencies: %w", err)
+	}
+	locations, err := s.queries.ListPersonnelLocationHistory(ctx, uuidToPgtype(personnelID))
+	if err != nil {
+		return PersonnelDetailResponse{}, fmt.Errorf("list personnel location history: %w", err)
+	}
+
+	response := PersonnelDetailResponse{
+		ID:                     pgtypeUUIDToUUID(profile.PersonnelID).String(),
+		PersonnelCode:          profile.PersonnelCode,
+		Name:                   profile.FullName,
+		Role:                   profile.Role,
+		MedicalClearanceStatus: profile.MedicalClearanceStatus,
+		Status:                 profile.PersonnelStatus,
+		CurrentStationName:     profile.CurrentStationName,
+		MovementTimeline:       make([]PersonnelMovementDetail, 0, len(movements)),
+		ExpeditionAssignments:  make([]PersonnelExpeditionAssignment, 0, len(assignments)),
+		Emergencies:            make([]PersonnelEmergencyResponse, 0, len(emergencies)),
+		LocationHistory:        make([]PersonnelLocationPoint, 0, len(locations)),
+	}
+	if profile.DeviceID.Valid {
+		response.Device = &PersonnelDeviceResponse{
+			ID:                pgtypeUUIDToUUID(profile.DeviceID).String(),
+			Label:             stringPtrValue(profile.DeviceLabel),
+			Status:            stringPtrValue(profile.DeviceStatus),
+			LastHeartbeatAt:   pgtypeTimePtr(profile.LastHeartbeatAt),
+			Latitude:          profile.LastLatitude,
+			Longitude:         profile.LastLongitude,
+			LocationAccuracyM: profile.LastAccuracyM,
+			AltitudeM:         profile.LastAltitudeM,
+			HeadingDeg:        profile.LastHeadingDeg,
+			SpeedMps:          profile.LastSpeedMps,
+			BatteryPercent:    profile.LastBatteryPercent,
+		}
+	}
+	for _, row := range movements {
+		response.MovementTimeline = append(response.MovementTimeline, PersonnelMovementDetail{
+			ID: uuidToString(row.ID), MovementType: row.MovementType,
+			OriginStationName: row.OriginStationName, DestinationStationName: row.DestinationStationName,
+			Status: row.Status, DepartedAt: pgtypeTimePtr(row.DepartedAt),
+			EstimatedArrivalAt: pgtypeTimePtr(row.EstimatedArrivalAt), ArrivedAt: pgtypeTimePtr(row.ArrivedAt),
+			Notes: row.Notes, ExpeditionCode: row.ExpeditionCode, ExpeditionName: row.ExpeditionName,
+		})
+	}
+	activeMovement, err := s.queries.GetPersonnelActiveMovement(ctx, uuidToPgtype(personnelID))
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return PersonnelDetailResponse{}, fmt.Errorf("get personnel active movement: %w", err)
+	}
+	if err == nil {
+		response.ActiveMovement = &PersonnelMovementDetail{
+			ID: uuidToString(activeMovement.ID), MovementType: activeMovement.MovementType,
+			OriginStationName: activeMovement.OriginStationName, DestinationStationName: activeMovement.DestinationStationName,
+			Status: activeMovement.Status, DepartedAt: pgtypeTimePtr(activeMovement.DepartedAt),
+			EstimatedArrivalAt: pgtypeTimePtr(activeMovement.EstimatedArrivalAt),
+			ExpeditionCode:     activeMovement.ExpeditionCode, ExpeditionName: activeMovement.ExpeditionName,
+		}
+	}
+	for _, row := range assignments {
+		response.ExpeditionAssignments = append(response.ExpeditionAssignments, PersonnelExpeditionAssignment{
+			ExpeditionID: uuidToString(row.ExpeditionID), ExpeditionCode: row.ExpeditionCode,
+			ExpeditionName: row.ExpeditionName, ExpeditionStatus: row.ExpeditionStatus,
+			AssignmentRole: row.AssignmentRole, AssignedAt: pgtypeTimeToTime(row.AssignedAt),
+			ReleasedAt: pgtypeTimePtr(row.ReleasedAt), OriginStationName: row.OriginStationName,
+			DestinationStationName: row.DestinationStationName,
+		})
+	}
+	for _, row := range emergencies {
+		response.Emergencies = append(response.Emergencies, PersonnelEmergencyResponse{
+			EmergencyID: uuidToString(row.EmergencyID), EmergencyCode: row.EmergencyCode,
+			EmergencyType: row.EmergencyType, Severity: row.Severity, Status: row.EmergencyStatus,
+			Summary: row.Summary, ReportedAt: pgtypeTimeToTime(row.ReportedAt),
+			ResolvedAt: pgtypeTimePtr(row.ResolvedAt), InvolvementType: row.InvolvementType,
+		})
+	}
+	for _, row := range locations {
+		response.LocationHistory = append(response.LocationHistory, PersonnelLocationPoint{
+			ID: uuidToString(row.ID), SignalType: row.SignalType, Latitude: row.Latitude,
+			Longitude: row.Longitude, LocationAccuracyM: row.LocationAccuracyM,
+			HeadingDeg: row.HeadingDeg, SpeedMps: row.SpeedMps,
+			BatteryPercent: row.BatteryPercent, OccurredAt: pgtypeTimeToTime(row.OccurredAt),
+		})
+	}
+	return response, nil
+}
+
 func (s *Service) AddToExpedition(ctx context.Context, request AddPersonnelRequest) (AddPersonnelResponse, error) {
 	if err := validateAssignment(request); err != nil {
 		return AddPersonnelResponse{}, err
@@ -178,4 +280,21 @@ func pgtypeTimeToTime(value pgtype.Timestamptz) time.Time {
 		return time.Time{}
 	}
 	return value.Time
+}
+
+func pgtypeTimePtr(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	result := value.Time
+	return &result
+}
+
+func uuidToString(value pgtype.UUID) string { return pgtypeUUIDToUUID(value).String() }
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

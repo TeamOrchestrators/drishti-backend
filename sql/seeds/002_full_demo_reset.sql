@@ -98,7 +98,15 @@ SELECT 'EXP-ANT-002', 'Bharti Resupply Deployment',
        (SELECT id FROM stations WHERE code = 'INDIA-HQ'),
        (SELECT id FROM stations WHERE code = 'BHARTI'),
        (SELECT id FROM personnel WHERE personnel_code = 'PERS-003'),
-       NOW() - INTERVAL '1 day', NOW() + INTERVAL '4 days', NULL, 'ready';
+       NOW() - INTERVAL '1 day', NOW() + INTERVAL '4 days', NULL, 'ready'
+UNION ALL
+SELECT 'EXP-ANT-003', 'Maitri Winter Logistics Support',
+       'Completed cross-station logistics support mission used for personnel-history demonstration.',
+       (SELECT id FROM stations WHERE code = 'MAITRI'),
+       (SELECT id FROM stations WHERE code = 'BHARTI'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-004'),
+       NOW() - INTERVAL '50 days', NOW() - INTERVAL '36 days',
+       NOW() - INTERVAL '50 days', 'completed';
 
 INSERT INTO expedition_members (expedition_id, personnel_id, assignment_role)
 SELECT e.id, p.id,
@@ -106,6 +114,15 @@ SELECT e.id, p.id,
 FROM expeditions e
 JOIN personnel p ON p.personnel_code IN ('PERS-001', 'PERS-003')
 WHERE e.expedition_code = 'EXP-ANT-001';
+
+INSERT INTO expedition_members (expedition_id, personnel_id, assignment_role, assigned_at, released_at)
+SELECT (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-003'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-004'),
+       'Mission lead', NOW() - INTERVAL '50 days', NOW() - INTERVAL '36 days'
+UNION ALL
+SELECT (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-003'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-005'),
+       'Communications support', NOW() - INTERVAL '50 days', NOW() - INTERVAL '36 days';
 
 INSERT INTO personnel_movements (
     personnel_id, expedition_id, movement_type, origin_station_id, destination_station_id,
@@ -124,7 +141,136 @@ SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-004'), NULL,
        (SELECT id FROM stations WHERE code = 'INDIA-HQ'),
        (SELECT id FROM stations WHERE code = 'MAITRI'),
        'arrived', NOW() - INTERVAL '14 days', NOW() - INTERVAL '12 days', NOW() - INTERVAL '12 days',
-       'Completed deployment to Maitri.';
+       'Completed deployment to Maitri.'
+UNION ALL
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-004'),
+       (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-003'),
+       'station_transfer',
+       (SELECT id FROM stations WHERE code = 'MAITRI'),
+       (SELECT id FROM stations WHERE code = 'BHARTI'),
+       'arrived', NOW() - INTERVAL '50 days', NOW() - INTERVAL '49 days', NOW() - INTERVAL '49 days',
+       'Transferred to Bharti to lead winter logistics support.'
+UNION ALL
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-004'),
+       (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-003'),
+       'station_transfer',
+       (SELECT id FROM stations WHERE code = 'BHARTI'),
+       (SELECT id FROM stations WHERE code = 'MAITRI'),
+       'arrived', NOW() - INTERVAL '37 days', NOW() - INTERVAL '36 days', NOW() - INTERVAL '36 days',
+       'Returned to Maitri after completed logistics mission.'
+UNION ALL
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-001'), NULL,
+       'deployment',
+       (SELECT id FROM stations WHERE code = 'INDIA-HQ'),
+       (SELECT id FROM stations WHERE code = 'BHARTI'),
+       'arrived', NOW() - INTERVAL '75 days', NOW() - INTERVAL '73 days', NOW() - INTERVAL '73 days',
+       'Completed seasonal deployment to Bharti.'
+UNION ALL
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-003'), NULL,
+       'deployment',
+       (SELECT id FROM stations WHERE code = 'INDIA-HQ'),
+       (SELECT id FROM stations WHERE code = 'BHARTI'),
+       'arrived', NOW() - INTERVAL '42 days', NOW() - INTERVAL '40 days', NOW() - INTERVAL '40 days',
+       'Completed logistics deployment to Bharti.'
+UNION ALL
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-005'),
+       (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-003'),
+       'station_transfer',
+       (SELECT id FROM stations WHERE code = 'MAITRI'),
+       (SELECT id FROM stations WHERE code = 'BHARTI'),
+       'arrived', NOW() - INTERVAL '50 days', NOW() - INTERVAL '49 days', NOW() - INTERVAL '49 days',
+       'Travelled to Bharti for winter logistics communications support.'
+UNION ALL
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-005'),
+       (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-003'),
+       'station_transfer',
+       (SELECT id FROM stations WHERE code = 'BHARTI'),
+       (SELECT id FROM stations WHERE code = 'MAITRI'),
+       'arrived', NOW() - INTERVAL '37 days', NOW() - INTERVAL '36 days', NOW() - INTERVAL '36 days',
+       'Returned to Maitri after winter logistics support.';
+
+-- Devices, heartbeat trails, and incidents make the personnel-detail drawer demo meaningful.
+INSERT INTO emergency_devices (
+    personnel_id, device_label, status, last_heartbeat_at,
+    last_latitude, last_longitude, last_accuracy_m, last_altitude_m,
+    last_heading_deg, last_speed_mps, last_battery_percent
+)
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-001'), 'SIM-BHARTI-ANANYA', 'active',
+       NOW() - INTERVAL '4 minutes', -69.405200, 76.198300, 8, 42, 118, 1.4, 82
+UNION ALL
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-002'), 'SIM-TRANSIT-ARJUN', 'active',
+       NOW() - INTERVAL '2 minutes', -45.120000, 62.470000, 12, 5, 152, 9.2, 67
+UNION ALL
+SELECT (SELECT id FROM personnel WHERE personnel_code = 'PERS-004'), 'SIM-MAITRI-ROHAN', 'active',
+       NOW() - INTERVAL '8 minutes', -70.766200, 11.734100, 6, 118, 205, 0.2, 91;
+
+INSERT INTO emergency_signals (
+    idempotency_key, personnel_id, device_id, signal_type, transmission_channel,
+    latitude, longitude, location_accuracy_m, altitude_m, heading_deg,
+    speed_mps, battery_percent, occurred_at, sync_status, payload_notes
+)
+SELECT gen_random_uuid(), p.id, d.id, 'heartbeat', 'mobile_http_simulator',
+       point.latitude, point.longitude, point.accuracy, point.altitude, point.heading,
+       point.speed, point.battery, NOW() - point.age, 'processed', 'Fresh-demo personnel tracking point'
+FROM (VALUES
+    ('PERS-001', -69.407500::NUMERIC, 76.191500::NUMERIC, 9::NUMERIC, 41::NUMERIC, 102::NUMERIC, 1.0::NUMERIC, 86::NUMERIC, INTERVAL '34 minutes'),
+    ('PERS-001', -69.406700::NUMERIC, 76.194200::NUMERIC, 8::NUMERIC, 42::NUMERIC, 109::NUMERIC, 1.2::NUMERIC, 84::NUMERIC, INTERVAL '18 minutes'),
+    ('PERS-001', -69.405200::NUMERIC, 76.198300::NUMERIC, 8::NUMERIC, 42::NUMERIC, 118::NUMERIC, 1.4::NUMERIC, 82::NUMERIC, INTERVAL '4 minutes'),
+    ('PERS-002', -39.800000::NUMERIC, 58.120000::NUMERIC, 15::NUMERIC, 5::NUMERIC, 145::NUMERIC, 10.5::NUMERIC, 73::NUMERIC, INTERVAL '5 hours'),
+    ('PERS-002', -42.600000::NUMERIC, 60.250000::NUMERIC, 13::NUMERIC, 5::NUMERIC, 149::NUMERIC, 9.8::NUMERIC, 70::NUMERIC, INTERVAL '2 hours'),
+    ('PERS-002', -45.120000::NUMERIC, 62.470000::NUMERIC, 12::NUMERIC, 5::NUMERIC, 152::NUMERIC, 9.2::NUMERIC, 67::NUMERIC, INTERVAL '2 minutes'),
+    ('PERS-004', -70.767100::NUMERIC, 11.731400::NUMERIC, 7::NUMERIC, 116::NUMERIC, 198::NUMERIC, 0.3::NUMERIC, 94::NUMERIC, INTERVAL '42 minutes'),
+    ('PERS-004', -70.766600::NUMERIC, 11.732800::NUMERIC, 6::NUMERIC, 117::NUMERIC, 201::NUMERIC, 0.2::NUMERIC, 92::NUMERIC, INTERVAL '21 minutes'),
+    ('PERS-004', -70.766200::NUMERIC, 11.734100::NUMERIC, 6::NUMERIC, 118::NUMERIC, 205::NUMERIC, 0.2::NUMERIC, 91::NUMERIC, INTERVAL '8 minutes')
+) AS point(personnel_code, latitude, longitude, accuracy, altitude, heading, speed, battery, age)
+JOIN personnel p ON p.personnel_code = point.personnel_code
+JOIN emergency_devices d ON d.personnel_id = p.id;
+
+INSERT INTO emergencies (
+    emergency_code, emergency_type, station_id, expedition_id, reported_by_personnel_id,
+    emergency_device_id, report_channel, severity, status, latitude, longitude,
+    location_accuracy_m, summary, reported_at, resolved_at
+)
+SELECT 'EMG-DEMO-001', 'whiteout', (SELECT id FROM stations WHERE code = 'MAITRI'),
+       (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-003'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-004'),
+       (SELECT id FROM emergency_devices WHERE device_label = 'SIM-MAITRI-ROHAN'),
+       'mobile_sos', 'critical', 'resolved', -70.766900, 11.731900, 9,
+       'Whiteout delayed return from the winter logistics support route.',
+       NOW() - INTERVAL '40 days', NOW() - INTERVAL '40 days' + INTERVAL '3 hours'
+UNION ALL
+SELECT 'EMG-DEMO-002', 'equipment_fault', (SELECT id FROM stations WHERE code = 'BHARTI'),
+       (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-001'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-001'),
+       (SELECT id FROM emergency_devices WHERE device_label = 'SIM-BHARTI-ANANYA'),
+       'mobile_sos', 'moderate', 'active', -69.405200, 76.198300, 8,
+       'Field generator fault reported during ice-shelf survey operations.', NOW() - INTERVAL '35 minutes', NULL;
+
+INSERT INTO emergency_personnel (emergency_id, personnel_id, involvement_type, status)
+SELECT (SELECT id FROM emergencies WHERE emergency_code = 'EMG-DEMO-001'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-004'), 'affected', 'safe'
+UNION ALL
+SELECT (SELECT id FROM emergencies WHERE emergency_code = 'EMG-DEMO-001'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-005'), 'responder', 'completed'
+UNION ALL
+SELECT (SELECT id FROM emergencies WHERE emergency_code = 'EMG-DEMO-002'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-001'), 'affected', 'awaiting_assessment'
+UNION ALL
+SELECT (SELECT id FROM emergencies WHERE emergency_code = 'EMG-DEMO-002'),
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-003'), 'coordinator', 'responding';
+
+INSERT INTO emergency_timeline_events (emergency_id, event_type, details, occurred_at, recorded_by_personnel_id)
+SELECT (SELECT id FROM emergencies WHERE emergency_code = 'EMG-DEMO-001'),
+       'sos_confirmed', 'Two-step SOS confirmed from the personnel device.', NOW() - INTERVAL '40 days',
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-004')
+UNION ALL
+SELECT (SELECT id FROM emergencies WHERE emergency_code = 'EMG-DEMO-001'),
+       'resolved', 'Weather cleared and the team returned safely to Maitri.', NOW() - INTERVAL '40 days' + INTERVAL '3 hours',
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-005')
+UNION ALL
+SELECT (SELECT id FROM emergencies WHERE emergency_code = 'EMG-DEMO-002'),
+       'reported', 'Generator fault logged for the active field survey response.', NOW() - INTERVAL '35 minutes',
+       (SELECT id FROM personnel WHERE personnel_code = 'PERS-001');
 
 INSERT INTO items (item_code, name, category, unit, is_critical)
 VALUES

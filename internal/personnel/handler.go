@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,6 +19,24 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	response, err := h.service.List(r.Context())
 	if err != nil {
 		http.Error(w, "could not list personnel", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) Detail(w http.ResponseWriter, r *http.Request) {
+	personnelID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid personnel id", http.StatusBadRequest)
+		return
+	}
+	response, err := h.service.Detail(r.Context(), personnelID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "personnel not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "could not retrieve personnel details", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, response)

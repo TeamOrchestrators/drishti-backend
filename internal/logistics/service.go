@@ -144,6 +144,10 @@ func (s *Service) GetByQR(ctx context.Context, cargoID uuid.UUID) (CargoQRDetail
 		Items:                  make([]CargoQRItemResponse, 0, len(items)),
 		ScanHistory:            make([]CargoQRScanResponse, 0, len(scans)),
 	}
+	if cargo.LogisticsBatchID.Valid {
+		batchID := uuidFromPg(cargo.LogisticsBatchID).String()
+		response.LogisticsBatchID = &batchID
+	}
 	for _, item := range items {
 		response.Items = append(response.Items, CargoQRItemResponse{
 			ItemID:           uuidFromPg(item.ItemID).String(),
@@ -186,39 +190,78 @@ func (s *Service) RecordQRScan(ctx context.Context, cargoID uuid.UUID, request R
 	if status != "" && !validCargoStatus(status) {
 		return RecordCargoQRScanResponse{}, fmt.Errorf("invalid cargo status")
 	}
-	if (request.Latitude == nil) != (request.Longitude == nil) {
-		return RecordCargoQRScanResponse{}, fmt.Errorf("latitude and longitude must be provided together")
+	if status == "" {
+		status = cargoStatusForScanEvent(eventType)
 	}
-	if request.Latitude != nil && (*request.Latitude < -90 || *request.Latitude > 90 || *request.Longitude < -180 || *request.Longitude > 180) {
+	if request.Latitude == nil || request.Longitude == nil {
+		return RecordCargoQRScanResponse{}, fmt.Errorf("latitude and longitude are required for a cargo checkpoint")
+	}
+	if *request.Latitude < -90 || *request.Latitude > 90 || *request.Longitude < -180 || *request.Longitude > 180 {
 		return RecordCargoQRScanResponse{}, fmt.Errorf("invalid latitude or longitude")
 	}
+	if request.ApplyToBatch && !cargo.LogisticsBatchID.Valid {
+		return RecordCargoQRScanResponse{}, fmt.Errorf("cargo is not assigned to a logistics batch")
+	}
 	notes := strings.TrimSpace(request.Notes)
-	params := db.RecordCargoQRScanParams{
+	params := db.RecordCargoQRCheckpointParams{
 		CargoID:              pgUUID(cargoID),
+		ApplyToBatch:         request.ApplyToBatch,
 		EventType:            eventType,
 		StationID:            pgUUIDPtr(request.StationID),
 		ScannedByPersonnelID: pgUUIDPtr(request.ScannedByPersonnelID),
-		Latitude:             request.Latitude,
-		Longitude:            request.Longitude,
+		Latitude:             *request.Latitude,
+		Longitude:            *request.Longitude,
+	}
+	if status != "" {
+		params.Status = &status
 	}
 	if notes != "" {
 		params.Notes = &notes
 	}
-	scan, err := s.queries.RecordCargoQRScan(ctx, params)
+	scan, err := s.queries.RecordCargoQRCheckpoint(ctx, params)
 	if err != nil {
-		return RecordCargoQRScanResponse{}, fmt.Errorf("record cargo QR scan: %w", err)
+		return RecordCargoQRScanResponse{}, fmt.Errorf("record cargo checkpoint: %w", err)
 	}
-	if status != "" {
-		if _, err := s.queries.UpdateCargoStatusFromQR(ctx, db.UpdateCargoStatusFromQRParams{CargoID: pgUUID(cargoID), Status: status}); err != nil {
-			return RecordCargoQRScanResponse{}, fmt.Errorf("update cargo status from QR scan: %w", err)
-		}
-	} else {
-		status = cargo.Status
+	responseStatus := status
+	if responseStatus == "" || cargo.Status == "received" || cargo.Status == "cancelled" {
+		responseStatus = cargo.Status
 	}
-	return RecordCargoQRScanResponse{
-		Status: true, Message: "cargo QR scan recorded", ScanID: uuidFromPg(scan.ID).String(),
-		CargoID: cargoID.String(), CargoStatus: status, ScannedAt: timeFromPg(scan.ScannedAt),
-	}, nil
+	response := RecordCargoQRScanResponse{
+		Status: true, Message: "cargo QR scan recorded", ScanID: uuidFromPg(scan.ScanID).String(),
+		CargoID: cargoID.String(), CargoStatus: responseStatus, ScannedAt: timeFromPg(scan.ScannedAt),
+		AppliedToBatch: request.ApplyToBatch, AffectedCargoCount: int(scan.AffectedCargoCount),
+		StatusUpdatedCount: int(scan.StatusUpdatedCount), LogisticsBatchCode: cargo.LogisticsBatchCode,
+	}
+	if cargo.LogisticsBatchID.Valid {
+		batchID := uuidFromPg(cargo.LogisticsBatchID).String()
+		response.LogisticsBatchID = &batchID
+	}
+	return response, nil
+}
+
+func (s *Service) GetBatchTracking(ctx context.Context, batchID uuid.UUID) (LogisticsBatchTrackingResponse, error) {
+	batch, err := s.queries.GetLogisticsBatchTracking(ctx, pgUUID(batchID))
+	if err != nil {
+		return LogisticsBatchTrackingResponse{}, fmt.Errorf("get logistics batch tracking: %w", err)
+	}
+	points, err := s.queries.ListLogisticsBatchCheckpointPoints(ctx, pgUUID(batchID))
+	if err != nil {
+		return LogisticsBatchTrackingResponse{}, fmt.Errorf("list logistics batch checkpoints: %w", err)
+	}
+	response := LogisticsBatchTrackingResponse{
+		ID: uuidFromPg(batch.ID).String(), BatchCode: batch.BatchCode, Status: batch.Status,
+		ExpeditionCode: batch.ExpeditionCode, ExpeditionName: batch.ExpeditionName,
+		OriginStationName: batch.OriginStationName, DestinationStationName: batch.DestinationStationName,
+		CargoCount: int(batch.CargoCount), Checkpoints: make([]LogisticsBatchCheckpointPoint, 0, len(points)),
+	}
+	for _, point := range points {
+		response.Checkpoints = append(response.Checkpoints, LogisticsBatchCheckpointPoint{
+			ID: uuidFromPg(point.ID).String(), EventType: point.EventType, Latitude: point.Latitude,
+			Longitude: point.Longitude, ScannedAt: timeFromPg(point.ScannedAt), Notes: point.Notes,
+			AffectedCargoCount: int(point.AffectedCargoCount),
+		})
+	}
+	return response, nil
 }
 
 func validBatchStatus(value string) bool {
@@ -241,6 +284,22 @@ func validCargoScanEvent(value string) bool {
 		return true
 	}
 	return false
+}
+func cargoStatusForScanEvent(eventType string) string {
+	switch eventType {
+	case "created":
+		return "draft"
+	case "packed":
+		return "packed"
+	case "dispatched":
+		return "dispatched"
+	case "received":
+		return "received"
+	case "damaged", "missing":
+		return "delayed"
+	default:
+		return ""
+	}
 }
 func pgUUID(id uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: id, Valid: true} }
 func pgUUIDPtr(id *uuid.UUID) pgtype.UUID {
