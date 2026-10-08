@@ -32,6 +32,11 @@ WHERE e.id = sqlc.arg(expedition_id)
   AND e.origin_station_id IS NOT NULL AND e.destination_station_id IS NOT NULL
 RETURNING *;
 
+-- name: GetLogisticsExpeditionWindow :one
+SELECT planned_start_at, planned_end_at
+FROM expeditions
+WHERE id = sqlc.arg(expedition_id);
+
 -- name: UpdateLogisticsBatch :one
 UPDATE logistics_batches
 SET status = sqlc.arg(status), planned_dispatch_at = sqlc.arg(planned_dispatch_at),
@@ -182,4 +187,4 @@ JOIN cargo c ON c.id = scan.cargo_id
 WHERE c.logistics_batch_id = sqlc.arg(logistics_batch_id)
   AND scan.latitude IS NOT NULL
   AND scan.longitude IS NOT NULL
-ORDER BY scan.scanned_at DESC, scan.latitude, scan.longitude, scan.event_type;
+ORDER BY scan.scanned_at ASC, scan.latitude, scan.longitude, scan.event_type;

@@ -252,6 +252,24 @@ func (q *Queries) GetLogisticsBatchTracking(ctx context.Context, logisticsBatchI
 	return i, err
 }
 
+const getLogisticsExpeditionWindow = `-- name: GetLogisticsExpeditionWindow :one
+SELECT planned_start_at, planned_end_at
+FROM expeditions
+WHERE id = $1
+`
+
+type GetLogisticsExpeditionWindowRow struct {
+	PlannedStartAt pgtype.Timestamptz `json:"planned_start_at"`
+	PlannedEndAt   pgtype.Timestamptz `json:"planned_end_at"`
+}
+
+func (q *Queries) GetLogisticsExpeditionWindow(ctx context.Context, expeditionID pgtype.UUID) (GetLogisticsExpeditionWindowRow, error) {
+	row := q.db.QueryRow(ctx, getLogisticsExpeditionWindow, expeditionID)
+	var i GetLogisticsExpeditionWindowRow
+	err := row.Scan(&i.PlannedStartAt, &i.PlannedEndAt)
+	return i, err
+}
+
 const listCargo = `-- name: ListCargo :many
 SELECT c.id, c.cargo_code, origin.name AS origin_station_name,
        destination.name AS destination_station_name, COALESCE(e.name, '') AS expedition_name,
@@ -430,7 +448,7 @@ JOIN cargo c ON c.id = scan.cargo_id
 WHERE c.logistics_batch_id = $1
   AND scan.latitude IS NOT NULL
   AND scan.longitude IS NOT NULL
-ORDER BY scan.scanned_at DESC, scan.latitude, scan.longitude, scan.event_type
+ORDER BY scan.scanned_at ASC, scan.latitude, scan.longitude, scan.event_type
 `
 
 type ListLogisticsBatchCheckpointPointsRow struct {

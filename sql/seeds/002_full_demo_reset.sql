@@ -43,14 +43,17 @@ SET name = EXCLUDED.name,
     personnel_capacity = EXCLUDED.personnel_capacity,
     notes = EXCLUDED.notes;
 
--- Ensure the standard demo roster exists while preserving any additional personnel.
+-- Ensure the complete demo roster exists, including the two added personnel
+-- used to demonstrate stationed and available states.
 INSERT INTO personnel (personnel_code, full_name, role, medical_clearance_status, current_station_id, status)
 VALUES
     ('PERS-001', 'Dr. Ananya Rao', 'Station Commander', 'cleared', (SELECT id FROM stations WHERE code = 'BHARTI'), 'available'),
     ('PERS-002', 'Dr. Arjun Mehta', 'Glaciologist', 'cleared', (SELECT id FROM stations WHERE code = 'BHARTI'), 'available'),
     ('PERS-003', 'Kavya Nair', 'Logistics Officer', 'cleared', (SELECT id FROM stations WHERE code = 'BHARTI'), 'available'),
     ('PERS-004', 'Dr. Rohan Iyer', 'Station Commander', 'cleared', (SELECT id FROM stations WHERE code = 'MAITRI'), 'available'),
-    ('PERS-005', 'Neel Sharma', 'Communications Engineer', 'cleared', (SELECT id FROM stations WHERE code = 'MAITRI'), 'available')
+    ('PERS-005', 'Neel Sharma', 'Communications Engineer', 'cleared', (SELECT id FROM stations WHERE code = 'MAITRI'), 'available'),
+    ('PERS-006', 'Dr. Ishita Sen', 'Meteorologist', 'cleared', (SELECT id FROM stations WHERE code = 'BHARTI'), 'assigned'),
+    ('PERS-007', 'Vikram Das', 'Field Engineer', 'cleared', (SELECT id FROM stations WHERE code = 'MAITRI'), 'available')
 ON CONFLICT (personnel_code) DO UPDATE
 SET full_name = EXCLUDED.full_name,
     role = EXCLUDED.role,
@@ -72,10 +75,14 @@ SET current_station_id = CASE p.personnel_code
     END
 WHERE p.personnel_code IN ('PERS-001', 'PERS-002', 'PERS-003', 'PERS-004', 'PERS-005');
 
--- Keep the two additional test personnel available at their intended stations.
+-- Ishita is stationed at Bharti and can be assigned to an eligible expedition;
+-- Vikram remains available at Maitri.
 UPDATE personnel p
 SET medical_clearance_status = 'cleared',
-    status = 'available',
+    status = CASE p.personnel_code
+        WHEN 'PERS-006' THEN 'assigned'
+        ELSE 'available'
+    END,
     current_station_id = CASE p.personnel_code
         WHEN 'PERS-006' THEN (SELECT id FROM stations WHERE code = 'BHARTI')
         WHEN 'PERS-007' THEN (SELECT id FROM stations WHERE code = 'MAITRI')

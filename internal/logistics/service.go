@@ -45,6 +45,16 @@ func (s *Service) CreateBatch(ctx context.Context, request CreateBatchRequest) (
 	if request.EstimatedArrivalAt.Before(request.PlannedDispatchAt) {
 		return MutationResponse{}, fmt.Errorf("estimated_arrival_at must not be before planned_dispatch_at")
 	}
+	expeditionWindow, err := s.queries.GetLogisticsExpeditionWindow(ctx, pgUUID(request.ExpeditionID))
+	if err != nil {
+		return MutationResponse{}, fmt.Errorf("get expedition schedule: %w", err)
+	}
+	if expeditionWindow.PlannedStartAt.Valid && request.PlannedDispatchAt.Before(expeditionWindow.PlannedStartAt.Time) {
+		return MutationResponse{}, fmt.Errorf("planned_dispatch_at must not be before the expedition start")
+	}
+	if expeditionWindow.PlannedEndAt.Valid && request.EstimatedArrivalAt.After(expeditionWindow.PlannedEndAt.Time) {
+		return MutationResponse{}, fmt.Errorf("estimated_arrival_at must not be after the expedition end")
+	}
 	status := request.Status
 	if status == "" {
 		status = "draft"

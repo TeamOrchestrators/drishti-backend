@@ -99,6 +99,8 @@ func (s *Service) AssignmentFormOptions(ctx context.Context) (AssignmentFormOpti
 			Name:                   row.Name,
 			OriginStationName:      row.OriginStationName,
 			DestinationStationName: row.DestinationStationName,
+			StartDate:              pgtypeTimePtr(row.StartDate),
+			EndDate:                pgtypeTimePtr(row.EndDate),
 		})
 	}
 	for _, row := range personnel {

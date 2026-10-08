@@ -46,10 +46,12 @@ type MovementHistory struct {
 }
 
 type AssignmentExpeditionOption struct {
-	ID                     uuid.UUID `json:"id"`
-	Name                   string    `json:"name"`
-	OriginStationName      string    `json:"origin_station_name"`
-	DestinationStationName string    `json:"destination_station_name"`
+	ID                     uuid.UUID  `json:"id"`
+	Name                   string     `json:"name"`
+	OriginStationName      string     `json:"origin_station_name"`
+	DestinationStationName string     `json:"destination_station_name"`
+	StartDate              *time.Time `json:"start_date,omitempty"`
+	EndDate                *time.Time `json:"end_date,omitempty"`
 }
 
 type AssignmentPersonnelOption struct {

@@ -54,7 +54,9 @@ ORDER BY m.arrived_at DESC NULLS LAST, m.created_at DESC;
 SELECT e.id,
        e.name,
        COALESCE(origin.name, '') AS origin_station_name,
-       COALESCE(destination.name, '') AS destination_station_name
+       COALESCE(destination.name, '') AS destination_station_name,
+       e.planned_start_at AS start_date,
+       e.planned_end_at AS end_date
 FROM expeditions e
 LEFT JOIN stations origin ON origin.id = e.origin_station_id
 LEFT JOIN stations destination ON destination.id = e.destination_station_id
@@ -87,7 +89,9 @@ WITH valid_assignment AS (
       AND e.planned_end_at IS NOT NULL
       AND e.planned_start_at <= sqlc.arg(departure_time)::TIMESTAMPTZ
       AND e.planned_end_at >= sqlc.arg(arrival_time)::TIMESTAMPTZ
-      AND p.status = 'available'
+      -- A cleared person stationed at the origin can join an expedition even
+      -- when their operational state is already "assigned".
+      AND p.status IN ('available', 'assigned')
       AND p.medical_clearance_status = 'cleared'
       AND p.current_station_id = sqlc.arg(origin_station_id)
       AND NOT EXISTS (
@@ -95,6 +99,16 @@ WITH valid_assignment AS (
           FROM personnel_movements m
           WHERE m.personnel_id = p.id
             AND m.status IN ('planned', 'in_transit')
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM expedition_members existing_member
+          JOIN expeditions existing_expedition
+            ON existing_expedition.id = existing_member.expedition_id
+          WHERE existing_member.personnel_id = p.id
+            AND existing_member.released_at IS NULL
+            AND existing_member.expedition_id <> e.id
+            AND existing_expedition.status NOT IN ('completed', 'cancelled')
       )
     FOR UPDATE OF e, p
 ), membership AS (
