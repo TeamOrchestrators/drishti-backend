@@ -15,6 +15,8 @@ type Cargo struct {
 	DestinationStationID pgtype.UUID        `json:"destination_station_id"`
 	ExpeditionID         pgtype.UUID        `json:"expedition_id"`
 	LogisticsBatchID     pgtype.UUID        `json:"logistics_batch_id"`
+	LogisticsShipmentID  pgtype.UUID        `json:"logistics_shipment_id"`
+	SourceCargoID        pgtype.UUID        `json:"source_cargo_id"`
 	Priority             string             `json:"priority"`
 	Status               string             `json:"status"`
 	CreatedByPersonnelID pgtype.UUID        `json:"created_by_personnel_id"`
@@ -227,6 +229,25 @@ type LogisticsBatch struct {
 	OriginStationID      pgtype.UUID        `json:"origin_station_id"`
 	DestinationStationID pgtype.UUID        `json:"destination_station_id"`
 	Status               string             `json:"status"`
+	PlannedDispatchAt    pgtype.Timestamptz `json:"planned_dispatch_at"`
+	EstimatedArrivalAt   pgtype.Timestamptz `json:"estimated_arrival_at"`
+	DispatchedAt         pgtype.Timestamptz `json:"dispatched_at"`
+	ReceivedAt           pgtype.Timestamptz `json:"received_at"`
+	Notes                *string            `json:"notes"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LogisticsShipment struct {
+	ID                   pgtype.UUID        `json:"id"`
+	ShipmentCode         string             `json:"shipment_code"`
+	LogisticsBatchID     pgtype.UUID        `json:"logistics_batch_id"`
+	OriginStationID      pgtype.UUID        `json:"origin_station_id"`
+	DestinationStationID pgtype.UUID        `json:"destination_station_id"`
+	TransportMode        string             `json:"transport_mode"`
+	Priority             string             `json:"priority"`
+	Status               string             `json:"status"`
+	IsDefaultRoute       bool               `json:"is_default_route"`
 	PlannedDispatchAt    pgtype.Timestamptz `json:"planned_dispatch_at"`
 	EstimatedArrivalAt   pgtype.Timestamptz `json:"estimated_arrival_at"`
 	DispatchedAt         pgtype.Timestamptz `json:"dispatched_at"`

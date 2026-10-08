@@ -2,6 +2,7 @@ package logistics
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -30,7 +31,12 @@ func (s *Service) List(ctx context.Context) (LogisticsListResponse, error) {
 		if row.OriginStationName != nil {
 			origin = *row.OriginStationName
 		}
-		response.Cargo = append(response.Cargo, CargoResponse{ID: uuidFromPg(row.ID).String(), CargoCode: row.CargoCode, OriginStationName: origin, DestinationStationName: row.DestinationStationName, ExpeditionName: row.ExpeditionName, LogisticsBatchCode: row.LogisticsBatchCode, Priority: row.Priority, Status: row.Status, Notes: row.Notes})
+		cargoResponse := CargoResponse{ID: uuidFromPg(row.ID).String(), CargoCode: row.CargoCode, OriginStationName: origin, DestinationStationName: row.DestinationStationName, ExpeditionName: row.ExpeditionName, LogisticsBatchCode: row.LogisticsBatchCode, LogisticsShipmentCode: row.LogisticsShipmentCode, TransportMode: row.TransportMode, Priority: row.Priority, Status: row.Status, Notes: row.Notes}
+		if row.LogisticsShipmentID.Valid {
+			id := uuidFromPg(row.LogisticsShipmentID).String()
+			cargoResponse.LogisticsShipmentID = &id
+		}
+		response.Cargo = append(response.Cargo, cargoResponse)
 	}
 	for _, row := range batches {
 		response.Batches = append(response.Batches, LogisticsBatchResponse{ID: uuidFromPg(row.ID).String(), BatchCode: row.BatchCode, ExpeditionName: row.ExpeditionName, OriginStationName: row.OriginStationName, DestinationStationName: row.DestinationStationName, Status: row.Status, PlannedDispatchAt: timeFromPg(row.PlannedDispatchAt), EstimatedArrivalAt: timeFromPg(row.EstimatedArrivalAt), CargoCount: int(row.CargoCount)})
@@ -67,8 +73,12 @@ func (s *Service) CreateBatch(ctx context.Context, request CreateBatchRequest) (
 	if notes != "" {
 		params.Notes = &notes
 	}
-	if _, err := s.queries.CreateLogisticsBatch(ctx, params); err != nil {
+	batch, err := s.queries.CreateLogisticsBatch(ctx, params)
+	if err != nil {
 		return MutationResponse{}, fmt.Errorf("create logistics batch: %w", err)
+	}
+	if _, err := s.queries.CreateDefaultLogisticsShipment(ctx, batch.ID); err != nil {
+		return MutationResponse{}, fmt.Errorf("create default shipment: %w", err)
 	}
 	return MutationResponse{Status: true, Message: "logistics batch created"}, nil
 }
@@ -122,6 +132,101 @@ func (s *Service) AssignCargo(ctx context.Context, cargoID, batchID uuid.UUID) (
 	return MutationResponse{Status: true, Message: "cargo assigned to logistics batch"}, nil
 }
 
+func (s *Service) CreateShipment(ctx context.Context, batchID uuid.UUID, request CreateShipmentRequest) (MutationResponse, error) {
+	if batchID == uuid.Nil || strings.TrimSpace(request.ShipmentCode) == "" || strings.TrimSpace(request.TransportMode) == "" {
+		return MutationResponse{}, fmt.Errorf("batch id, shipment_code, and transport_mode are required")
+	}
+	if !validTransportMode(request.TransportMode) || (request.Priority != "" && !validCargoPriority(request.Priority)) || (request.Status != "" && !validBatchStatus(request.Status)) {
+		return MutationResponse{}, fmt.Errorf("invalid shipment transport_mode, priority, or status")
+	}
+	if request.PlannedDispatchAt.IsZero() || request.EstimatedArrivalAt.IsZero() || request.EstimatedArrivalAt.Before(request.PlannedDispatchAt) {
+		return MutationResponse{}, fmt.Errorf("estimated_arrival_at must not be before planned_dispatch_at")
+	}
+	// A split route may leave before the parent batch's planned dispatch, but
+	// must still fit inside the parent expedition's operational window.
+	expeditionWindow, err := s.queries.GetLogisticsShipmentWindow(ctx, pgUUID(batchID))
+	if err != nil {
+		return MutationResponse{}, fmt.Errorf("get parent expedition schedule: %w", err)
+	}
+	if expeditionWindow.PlannedStartAt.Valid && request.PlannedDispatchAt.Before(expeditionWindow.PlannedStartAt.Time) {
+		return MutationResponse{}, fmt.Errorf("planned_dispatch_at must not be before the expedition start")
+	}
+	if expeditionWindow.PlannedEndAt.Valid && request.EstimatedArrivalAt.After(expeditionWindow.PlannedEndAt.Time) {
+		return MutationResponse{}, fmt.Errorf("estimated_arrival_at must not be after the expedition end")
+	}
+	priority, status := request.Priority, request.Status
+	if priority == "" {
+		priority = "standard"
+	}
+	if status == "" {
+		status = "planned"
+	}
+	params := db.CreateLogisticsShipmentParams{ShipmentCode: strings.TrimSpace(request.ShipmentCode), LogisticsBatchID: pgUUID(batchID), TransportMode: request.TransportMode, Priority: priority, Status: status, PlannedDispatchAt: pgTime(request.PlannedDispatchAt), EstimatedArrivalAt: pgTime(request.EstimatedArrivalAt)}
+	if notes := strings.TrimSpace(request.Notes); notes != "" {
+		params.Notes = &notes
+	}
+	if _, err := s.queries.CreateLogisticsShipment(ctx, params); err != nil {
+		return MutationResponse{}, fmt.Errorf("create logistics shipment: %w", err)
+	}
+	return MutationResponse{Status: true, Message: "logistics shipment created"}, nil
+}
+
+func (s *Service) AssignCargoToShipment(ctx context.Context, cargoID uuid.UUID, shipmentID *uuid.UUID) (MutationResponse, error) {
+	if cargoID == uuid.Nil {
+		return MutationResponse{}, fmt.Errorf("cargo_id is required")
+	}
+	if shipmentID == nil || *shipmentID == uuid.Nil {
+		if _, err := s.queries.ClearCargoLogisticsShipment(ctx, pgUUID(cargoID)); err != nil {
+			return MutationResponse{}, fmt.Errorf("clear cargo shipment: %w", err)
+		}
+		return MutationResponse{Status: true, Message: "cargo removed from logistics shipment"}, nil
+	}
+	if _, err := s.queries.AssignCargoToLogisticsShipment(ctx, db.AssignCargoToLogisticsShipmentParams{CargoID: pgUUID(cargoID), LogisticsShipmentID: pgUUID(*shipmentID)}); err != nil {
+		return MutationResponse{}, fmt.Errorf("assign cargo to shipment: %w", err)
+	}
+	return MutationResponse{Status: true, Message: "cargo assigned to logistics shipment"}, nil
+}
+
+func (s *Service) SplitCargo(ctx context.Context, sourceCargoID uuid.UUID, request SplitCargoRequest) (SplitCargoResponse, error) {
+	if sourceCargoID == uuid.Nil || strings.TrimSpace(request.NewCargoCode) == "" || len(request.Items) == 0 {
+		return SplitCargoResponse{}, fmt.Errorf("source cargo id, new_cargo_code, and at least one item are required")
+	}
+	seen := make(map[uuid.UUID]struct{}, len(request.Items))
+	for _, item := range request.Items {
+		if item.ItemID == uuid.Nil || item.Quantity <= 0 {
+			return SplitCargoResponse{}, fmt.Errorf("every split item requires an item_id and positive quantity")
+		}
+		if _, exists := seen[item.ItemID]; exists {
+			return SplitCargoResponse{}, fmt.Errorf("split items cannot contain duplicate item_id values")
+		}
+		seen[item.ItemID] = struct{}{}
+	}
+	priority := request.Priority
+	if priority == "" {
+		priority = "standard"
+	}
+	if !validCargoPriority(priority) {
+		return SplitCargoResponse{}, fmt.Errorf("invalid cargo priority")
+	}
+	itemsJSON, err := json.Marshal(request.Items)
+	if err != nil {
+		return SplitCargoResponse{}, fmt.Errorf("encode split items: %w", err)
+	}
+	params := db.SplitCargoManifestParams{SourceCargoID: pgUUID(sourceCargoID), ItemsJson: itemsJSON, NewCargoCode: strings.TrimSpace(request.NewCargoCode), Priority: priority, LogisticsShipmentID: pgUUIDPtr(request.ShipmentID)}
+	if notes := strings.TrimSpace(request.Notes); notes != "" {
+		params.Notes = &notes
+	}
+	childID, err := s.queries.SplitCargoManifest(ctx, params)
+	if err != nil {
+		return SplitCargoResponse{}, fmt.Errorf("split cargo manifest: %w", err)
+	}
+	if !childID.Valid {
+		return SplitCargoResponse{}, fmt.Errorf("split cargo manifest: requested quantities or shipment are not valid")
+	}
+	id := uuidFromPg(childID).String()
+	return SplitCargoResponse{Status: true, Message: "cargo manifest split", CargoID: id, QRToken: id, SourceCargoID: sourceCargoID.String()}, nil
+}
+
 func (s *Service) GetByQR(ctx context.Context, cargoID uuid.UUID) (CargoQRDetailResponse, error) {
 	cargo, err := s.queries.GetCargoForQR(ctx, pgUUID(cargoID))
 	if err != nil {
@@ -145,6 +250,8 @@ func (s *Service) GetByQR(ctx context.Context, cargoID uuid.UUID) (CargoQRDetail
 		ExpeditionCode:         cargo.ExpeditionCode,
 		ExpeditionName:         cargo.ExpeditionName,
 		LogisticsBatchCode:     cargo.LogisticsBatchCode,
+		LogisticsShipmentCode:  cargo.LogisticsShipmentCode,
+		TransportMode:          cargo.TransportMode,
 		Priority:               cargo.Priority,
 		Status:                 cargo.Status,
 		Notes:                  cargo.Notes,
@@ -157,6 +264,14 @@ func (s *Service) GetByQR(ctx context.Context, cargoID uuid.UUID) (CargoQRDetail
 	if cargo.LogisticsBatchID.Valid {
 		batchID := uuidFromPg(cargo.LogisticsBatchID).String()
 		response.LogisticsBatchID = &batchID
+	}
+	if cargo.LogisticsShipmentID.Valid {
+		shipmentID := uuidFromPg(cargo.LogisticsShipmentID).String()
+		response.LogisticsShipmentID = &shipmentID
+	}
+	if cargo.SourceCargoID.Valid {
+		sourceID := uuidFromPg(cargo.SourceCargoID).String()
+		response.SourceCargoID = &sourceID
 	}
 	for _, item := range items {
 		response.Items = append(response.Items, CargoQRItemResponse{
@@ -209,13 +324,27 @@ func (s *Service) RecordQRScan(ctx context.Context, cargoID uuid.UUID, request R
 	if *request.Latitude < -90 || *request.Latitude > 90 || *request.Longitude < -180 || *request.Longitude > 180 {
 		return RecordCargoQRScanResponse{}, fmt.Errorf("invalid latitude or longitude")
 	}
-	if request.ApplyToBatch && !cargo.LogisticsBatchID.Valid {
+	scope := strings.TrimSpace(request.Scope)
+	if scope == "" {
+		if request.ApplyToBatch {
+			scope = "batch"
+		} else {
+			scope = "cargo"
+		}
+	}
+	if scope != "cargo" && scope != "shipment" && scope != "batch" {
+		return RecordCargoQRScanResponse{}, fmt.Errorf("scope must be cargo, shipment, or batch")
+	}
+	if scope == "batch" && !cargo.LogisticsBatchID.Valid {
 		return RecordCargoQRScanResponse{}, fmt.Errorf("cargo is not assigned to a logistics batch")
+	}
+	if scope == "shipment" && !cargo.LogisticsShipmentID.Valid {
+		return RecordCargoQRScanResponse{}, fmt.Errorf("cargo is not assigned to a logistics shipment")
 	}
 	notes := strings.TrimSpace(request.Notes)
 	params := db.RecordCargoQRCheckpointParams{
 		CargoID:              pgUUID(cargoID),
-		ApplyToBatch:         request.ApplyToBatch,
+		PropagationScope:     scope,
 		EventType:            eventType,
 		StationID:            pgUUIDPtr(request.StationID),
 		ScannedByPersonnelID: pgUUIDPtr(request.ScannedByPersonnelID),
@@ -239,7 +368,7 @@ func (s *Service) RecordQRScan(ctx context.Context, cargoID uuid.UUID, request R
 	response := RecordCargoQRScanResponse{
 		Status: true, Message: "cargo QR scan recorded", ScanID: uuidFromPg(scan.ScanID).String(),
 		CargoID: cargoID.String(), CargoStatus: responseStatus, ScannedAt: timeFromPg(scan.ScannedAt),
-		AppliedToBatch: request.ApplyToBatch, AffectedCargoCount: int(scan.AffectedCargoCount),
+		AppliedToBatch: scope == "batch", PropagationScope: scope, AffectedCargoCount: int(scan.AffectedCargoCount),
 		StatusUpdatedCount: int(scan.StatusUpdatedCount), LogisticsBatchCode: cargo.LogisticsBatchCode,
 	}
 	if cargo.LogisticsBatchID.Valid {
@@ -258,11 +387,15 @@ func (s *Service) GetBatchTracking(ctx context.Context, batchID uuid.UUID) (Logi
 	if err != nil {
 		return LogisticsBatchTrackingResponse{}, fmt.Errorf("list logistics batch checkpoints: %w", err)
 	}
+	shipments, err := s.queries.ListLogisticsShipmentsForBatch(ctx, pgUUID(batchID))
+	if err != nil {
+		return LogisticsBatchTrackingResponse{}, fmt.Errorf("list logistics shipments: %w", err)
+	}
 	response := LogisticsBatchTrackingResponse{
 		ID: uuidFromPg(batch.ID).String(), BatchCode: batch.BatchCode, Status: batch.Status,
 		ExpeditionCode: batch.ExpeditionCode, ExpeditionName: batch.ExpeditionName,
 		OriginStationName: batch.OriginStationName, DestinationStationName: batch.DestinationStationName,
-		CargoCount: int(batch.CargoCount), Checkpoints: make([]LogisticsBatchCheckpointPoint, 0, len(points)),
+		CargoCount: int(batch.CargoCount), Checkpoints: make([]LogisticsBatchCheckpointPoint, 0, len(points)), Shipments: make([]LogisticsShipmentTrackingResponse, 0, len(shipments)),
 	}
 	for _, point := range points {
 		response.Checkpoints = append(response.Checkpoints, LogisticsBatchCheckpointPoint{
@@ -271,6 +404,20 @@ func (s *Service) GetBatchTracking(ctx context.Context, batchID uuid.UUID) (Logi
 			AffectedCargoCount: int(point.AffectedCargoCount),
 		})
 	}
+	shipmentStatuses := make(map[string]int, len(shipments))
+	for _, shipment := range shipments {
+		checkpointRows, err := s.queries.ListLogisticsShipmentCheckpointPoints(ctx, shipment.ID)
+		if err != nil {
+			return LogisticsBatchTrackingResponse{}, fmt.Errorf("list shipment checkpoints: %w", err)
+		}
+		shipmentResponse := LogisticsShipmentTrackingResponse{ID: uuidFromPg(shipment.ID).String(), ShipmentCode: shipment.ShipmentCode, TransportMode: shipment.TransportMode, Priority: shipment.Priority, Status: shipment.Status, PlannedDispatchAt: timePtrFromPg(shipment.PlannedDispatchAt), EstimatedArrivalAt: timePtrFromPg(shipment.EstimatedArrivalAt), CargoCount: int(shipment.CargoCount), TotalQuantity: shipment.TotalQuantity, Checkpoints: make([]LogisticsShipmentCheckpointPoint, 0, len(checkpointRows))}
+		shipmentStatuses[shipment.Status]++
+		for _, point := range checkpointRows {
+			shipmentResponse.Checkpoints = append(shipmentResponse.Checkpoints, LogisticsShipmentCheckpointPoint{ID: uuidFromPg(point.ID).String(), CargoID: uuidFromPg(point.CargoID).String(), CargoCode: point.CargoCode, EventType: point.EventType, Latitude: point.Latitude, Longitude: point.Longitude, ScannedAt: timeFromPg(point.ScannedAt), Notes: point.Notes})
+		}
+		response.Shipments = append(response.Shipments, shipmentResponse)
+	}
+	response.ProgressStatus = deriveBatchProgress(batch.Status, shipmentStatuses, len(shipments))
 	return response, nil
 }
 
@@ -287,6 +434,30 @@ func validCargoStatus(value string) bool {
 		return true
 	}
 	return false
+}
+func validCargoPriority(value string) bool {
+	return value == "standard" || value == "high" || value == "critical"
+}
+func validTransportMode(value string) bool {
+	return value == "ground" || value == "airlift" || value == "sea_lift" || value == "mixed" || value == "other"
+}
+func deriveBatchProgress(batchStatus string, statuses map[string]int, shipmentCount int) string {
+	if shipmentCount == 0 {
+		return batchStatus
+	}
+	if statuses["received"] == shipmentCount {
+		return "received"
+	}
+	if statuses["received"] > 0 {
+		return "partially_received"
+	}
+	if statuses["dispatched"]+statuses["in_transit"] > 0 && statuses["dispatched"]+statuses["in_transit"] < shipmentCount {
+		return "partially_dispatched"
+	}
+	if statuses["dispatched"]+statuses["in_transit"] == shipmentCount {
+		return "dispatched"
+	}
+	return batchStatus
 }
 func validCargoScanEvent(value string) bool {
 	switch value {

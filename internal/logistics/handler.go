@@ -66,6 +66,60 @@ func (h *Handler) AssignCargo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (h *Handler) AssignCargoToShipment(w http.ResponseWriter, r *http.Request) {
+	cargoID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid cargo id", http.StatusBadRequest)
+		return
+	}
+	var request AssignCargoShipmentRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	response, err := h.service.AssignCargoToShipment(r.Context(), cargoID, request.ShipmentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) SplitCargo(w http.ResponseWriter, r *http.Request) {
+	cargoID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid cargo id", http.StatusBadRequest)
+		return
+	}
+	var request SplitCargoRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	response, err := h.service.SplitCargo(r.Context(), cargoID, request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
+}
+
+func (h *Handler) CreateShipment(w http.ResponseWriter, r *http.Request) {
+	batchID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid logistics batch id", http.StatusBadRequest)
+		return
+	}
+	var request CreateShipmentRequest
+	if !decode(w, r, &request) {
+		return
+	}
+	response, err := h.service.CreateShipment(r.Context(), batchID, request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
+}
+
 func (h *Handler) GetByQR(w http.ResponseWriter, r *http.Request) {
 	cargoID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {

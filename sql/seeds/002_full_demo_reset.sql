@@ -13,6 +13,7 @@ TRUNCATE TABLE
     cargo_qr_scans,
     cargo_items,
     cargo,
+    logistics_shipments,
     logistics_batches,
     expedition_resource_allocations,
     expedition_resource_requirements,
@@ -354,25 +355,50 @@ SELECT 'BATCH-ANT-002', (SELECT id FROM expeditions WHERE expedition_code = 'EXP
        'packed', NOW() + INTERVAL '12 hours', NOW() + INTERVAL '3 days', NULL,
        'Deployment batch ready for dispatch.';
 
+-- One parent manifest can take independently tracked routes: urgent medical
+-- crates fly ahead while the remaining supplies follow the planned route.
+INSERT INTO logistics_shipments (
+    shipment_code, logistics_batch_id, origin_station_id, destination_station_id,
+    transport_mode, priority, status, is_default_route, planned_dispatch_at,
+    estimated_arrival_at, dispatched_at, notes
+)
+SELECT 'SHIP-ANT-001-AIR', (SELECT id FROM logistics_batches WHERE batch_code = 'BATCH-ANT-001'),
+       (SELECT id FROM stations WHERE code = 'BHARTI'), (SELECT id FROM stations WHERE code = 'MAITRI'),
+       'airlift', 'critical', 'dispatched', FALSE, NOW() - INTERVAL '8 hours', NOW() + INTERVAL '8 hours', NOW() - INTERVAL '6 hours',
+       'Urgent airlift of medical and fuel crates.'
+UNION ALL
+SELECT 'SHIP-ANT-001-PLAN', (SELECT id FROM logistics_batches WHERE batch_code = 'BATCH-ANT-001'),
+       (SELECT id FROM stations WHERE code = 'BHARTI'), (SELECT id FROM stations WHERE code = 'MAITRI'),
+       'ground', 'high', 'planned', TRUE, NOW() - INTERVAL '1 day', NOW() + INTERVAL '2 days', NULL,
+       'Planned remainder of the field-support manifest.'
+UNION ALL
+SELECT 'SHIP-ANT-002-PLAN', (SELECT id FROM logistics_batches WHERE batch_code = 'BATCH-ANT-002'),
+       (SELECT id FROM stations WHERE code = 'INDIA-HQ'), (SELECT id FROM stations WHERE code = 'BHARTI'),
+       'ground', 'standard', 'packed', TRUE, NOW() + INTERVAL '12 hours', NOW() + INTERVAL '3 days', NULL,
+       'Default deployment route.';
+
 INSERT INTO cargo (
-    cargo_code, origin_station_id, destination_station_id, expedition_id, logistics_batch_id,
+    cargo_code, origin_station_id, destination_station_id, expedition_id, logistics_batch_id, logistics_shipment_id,
     priority, status, created_by_personnel_id, dispatched_at, notes
 )
 SELECT 'CG-ANT-001', (SELECT id FROM stations WHERE code = 'BHARTI'), (SELECT id FROM stations WHERE code = 'MAITRI'),
        (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-001'),
        (SELECT id FROM logistics_batches WHERE batch_code = 'BATCH-ANT-001'),
+       (SELECT id FROM logistics_shipments WHERE shipment_code = 'SHIP-ANT-001-AIR'),
        'critical', 'in_transit', (SELECT id FROM personnel WHERE personnel_code = 'PERS-003'), NOW() - INTERVAL '6 hours',
        'Medical and fuel support for active field team.'
 UNION ALL
 SELECT 'CG-ANT-002', (SELECT id FROM stations WHERE code = 'BHARTI'), (SELECT id FROM stations WHERE code = 'MAITRI'),
        (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-001'),
        (SELECT id FROM logistics_batches WHERE batch_code = 'BATCH-ANT-001'),
-       'high', 'in_transit', (SELECT id FROM personnel WHERE personnel_code = 'PERS-003'), NOW() - INTERVAL '6 hours',
+       (SELECT id FROM logistics_shipments WHERE shipment_code = 'SHIP-ANT-001-PLAN'),
+       'high', 'packed', (SELECT id FROM personnel WHERE personnel_code = 'PERS-003'), NULL,
        'Food and maintenance support.'
 UNION ALL
 SELECT 'CG-ANT-003', (SELECT id FROM stations WHERE code = 'INDIA-HQ'), (SELECT id FROM stations WHERE code = 'BHARTI'),
        (SELECT id FROM expeditions WHERE expedition_code = 'EXP-ANT-002'),
        (SELECT id FROM logistics_batches WHERE batch_code = 'BATCH-ANT-002'),
+       (SELECT id FROM logistics_shipments WHERE shipment_code = 'SHIP-ANT-002-PLAN'),
        'standard', 'packed', (SELECT id FROM personnel WHERE personnel_code = 'PERS-003'), NULL,
        'Bharti deployment equipment.';
 

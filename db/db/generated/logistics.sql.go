@@ -13,12 +13,13 @@ import (
 
 const assignCargoToLogisticsBatch = `-- name: AssignCargoToLogisticsBatch :one
 UPDATE cargo c
-SET logistics_batch_id = b.id, expedition_id = b.expedition_id,
+SET logistics_batch_id = b.id, logistics_shipment_id = shipment.id, expedition_id = b.expedition_id,
     origin_station_id = b.origin_station_id, destination_station_id = b.destination_station_id
 FROM logistics_batches b
+JOIN logistics_shipments shipment ON shipment.logistics_batch_id = b.id AND shipment.is_default_route = TRUE
 WHERE c.id = $1 AND b.id = $2
   AND b.status NOT IN ('received', 'cancelled')
-RETURNING c.id, c.cargo_code, c.origin_station_id, c.destination_station_id, c.expedition_id, c.logistics_batch_id, c.priority, c.status, c.created_by_personnel_id, c.dispatched_at, c.received_at, c.notes, c.created_at, c.updated_at
+RETURNING c.id, c.cargo_code, c.origin_station_id, c.destination_station_id, c.expedition_id, c.logistics_batch_id, c.logistics_shipment_id, c.source_cargo_id, c.priority, c.status, c.created_by_personnel_id, c.dispatched_at, c.received_at, c.notes, c.created_at, c.updated_at
 `
 
 type AssignCargoToLogisticsBatchParams struct {
@@ -36,6 +37,82 @@ func (q *Queries) AssignCargoToLogisticsBatch(ctx context.Context, arg AssignCar
 		&i.DestinationStationID,
 		&i.ExpeditionID,
 		&i.LogisticsBatchID,
+		&i.LogisticsShipmentID,
+		&i.SourceCargoID,
+		&i.Priority,
+		&i.Status,
+		&i.CreatedByPersonnelID,
+		&i.DispatchedAt,
+		&i.ReceivedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const assignCargoToLogisticsShipment = `-- name: AssignCargoToLogisticsShipment :one
+UPDATE cargo c
+SET logistics_shipment_id = shipment.id,
+    logistics_batch_id = shipment.logistics_batch_id,
+    origin_station_id = shipment.origin_station_id,
+    destination_station_id = shipment.destination_station_id
+FROM logistics_shipments shipment
+WHERE c.id = $1
+  AND shipment.id = $2
+  AND shipment.status NOT IN ('received', 'cancelled')
+  AND (c.logistics_batch_id IS NULL OR c.logistics_batch_id = shipment.logistics_batch_id)
+RETURNING c.id, c.cargo_code, c.origin_station_id, c.destination_station_id, c.expedition_id, c.logistics_batch_id, c.logistics_shipment_id, c.source_cargo_id, c.priority, c.status, c.created_by_personnel_id, c.dispatched_at, c.received_at, c.notes, c.created_at, c.updated_at
+`
+
+type AssignCargoToLogisticsShipmentParams struct {
+	CargoID             pgtype.UUID `json:"cargo_id"`
+	LogisticsShipmentID pgtype.UUID `json:"logistics_shipment_id"`
+}
+
+func (q *Queries) AssignCargoToLogisticsShipment(ctx context.Context, arg AssignCargoToLogisticsShipmentParams) (Cargo, error) {
+	row := q.db.QueryRow(ctx, assignCargoToLogisticsShipment, arg.CargoID, arg.LogisticsShipmentID)
+	var i Cargo
+	err := row.Scan(
+		&i.ID,
+		&i.CargoCode,
+		&i.OriginStationID,
+		&i.DestinationStationID,
+		&i.ExpeditionID,
+		&i.LogisticsBatchID,
+		&i.LogisticsShipmentID,
+		&i.SourceCargoID,
+		&i.Priority,
+		&i.Status,
+		&i.CreatedByPersonnelID,
+		&i.DispatchedAt,
+		&i.ReceivedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const clearCargoLogisticsShipment = `-- name: ClearCargoLogisticsShipment :one
+UPDATE cargo
+SET logistics_shipment_id = NULL
+WHERE id = $1
+RETURNING id, cargo_code, origin_station_id, destination_station_id, expedition_id, logistics_batch_id, logistics_shipment_id, source_cargo_id, priority, status, created_by_personnel_id, dispatched_at, received_at, notes, created_at, updated_at
+`
+
+func (q *Queries) ClearCargoLogisticsShipment(ctx context.Context, cargoID pgtype.UUID) (Cargo, error) {
+	row := q.db.QueryRow(ctx, clearCargoLogisticsShipment, cargoID)
+	var i Cargo
+	err := row.Scan(
+		&i.ID,
+		&i.CargoCode,
+		&i.OriginStationID,
+		&i.DestinationStationID,
+		&i.ExpeditionID,
+		&i.LogisticsBatchID,
+		&i.LogisticsShipmentID,
+		&i.SourceCargoID,
 		&i.Priority,
 		&i.Status,
 		&i.CreatedByPersonnelID,
@@ -52,7 +129,7 @@ const createCargo = `-- name: CreateCargo :one
 INSERT INTO cargo (cargo_code, origin_station_id, destination_station_id, expedition_id, logistics_batch_id, priority, status, notes)
 VALUES ($1, $2, $3,
         $4, $5, $6, $7, $8)
-RETURNING id, cargo_code, origin_station_id, destination_station_id, expedition_id, logistics_batch_id, priority, status, created_by_personnel_id, dispatched_at, received_at, notes, created_at, updated_at
+RETURNING id, cargo_code, origin_station_id, destination_station_id, expedition_id, logistics_batch_id, logistics_shipment_id, source_cargo_id, priority, status, created_by_personnel_id, dispatched_at, received_at, notes, created_at, updated_at
 `
 
 type CreateCargoParams struct {
@@ -85,9 +162,49 @@ func (q *Queries) CreateCargo(ctx context.Context, arg CreateCargoParams) (Cargo
 		&i.DestinationStationID,
 		&i.ExpeditionID,
 		&i.LogisticsBatchID,
+		&i.LogisticsShipmentID,
+		&i.SourceCargoID,
 		&i.Priority,
 		&i.Status,
 		&i.CreatedByPersonnelID,
+		&i.DispatchedAt,
+		&i.ReceivedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createDefaultLogisticsShipment = `-- name: CreateDefaultLogisticsShipment :one
+INSERT INTO logistics_shipments (
+    shipment_code, logistics_batch_id, origin_station_id, destination_station_id,
+    transport_mode, priority, status, is_default_route, planned_dispatch_at,
+    estimated_arrival_at, notes
+)
+SELECT b.batch_code || '-DEFAULT', b.id, b.origin_station_id, b.destination_station_id,
+       'ground', 'standard', b.status, TRUE, b.planned_dispatch_at,
+       b.estimated_arrival_at, 'Default route for the parent manifest.'
+FROM logistics_batches b
+WHERE b.id = $1
+RETURNING id, shipment_code, logistics_batch_id, origin_station_id, destination_station_id, transport_mode, priority, status, is_default_route, planned_dispatch_at, estimated_arrival_at, dispatched_at, received_at, notes, created_at, updated_at
+`
+
+func (q *Queries) CreateDefaultLogisticsShipment(ctx context.Context, logisticsBatchID pgtype.UUID) (LogisticsShipment, error) {
+	row := q.db.QueryRow(ctx, createDefaultLogisticsShipment, logisticsBatchID)
+	var i LogisticsShipment
+	err := row.Scan(
+		&i.ID,
+		&i.ShipmentCode,
+		&i.LogisticsBatchID,
+		&i.OriginStationID,
+		&i.DestinationStationID,
+		&i.TransportMode,
+		&i.Priority,
+		&i.Status,
+		&i.IsDefaultRoute,
+		&i.PlannedDispatchAt,
+		&i.EstimatedArrivalAt,
 		&i.DispatchedAt,
 		&i.ReceivedAt,
 		&i.Notes,
@@ -145,6 +262,64 @@ func (q *Queries) CreateLogisticsBatch(ctx context.Context, arg CreateLogisticsB
 	return i, err
 }
 
+const createLogisticsShipment = `-- name: CreateLogisticsShipment :one
+INSERT INTO logistics_shipments (
+    shipment_code, logistics_batch_id, origin_station_id, destination_station_id,
+    transport_mode, priority, status, planned_dispatch_at, estimated_arrival_at, notes
+)
+SELECT $1, b.id, b.origin_station_id, b.destination_station_id,
+       $2, $3, $4,
+       $5, $6, $7
+FROM logistics_batches b
+WHERE b.id = $8
+  AND b.status NOT IN ('received', 'cancelled')
+RETURNING id, shipment_code, logistics_batch_id, origin_station_id, destination_station_id, transport_mode, priority, status, is_default_route, planned_dispatch_at, estimated_arrival_at, dispatched_at, received_at, notes, created_at, updated_at
+`
+
+type CreateLogisticsShipmentParams struct {
+	ShipmentCode       string             `json:"shipment_code"`
+	TransportMode      string             `json:"transport_mode"`
+	Priority           string             `json:"priority"`
+	Status             string             `json:"status"`
+	PlannedDispatchAt  pgtype.Timestamptz `json:"planned_dispatch_at"`
+	EstimatedArrivalAt pgtype.Timestamptz `json:"estimated_arrival_at"`
+	Notes              *string            `json:"notes"`
+	LogisticsBatchID   pgtype.UUID        `json:"logistics_batch_id"`
+}
+
+func (q *Queries) CreateLogisticsShipment(ctx context.Context, arg CreateLogisticsShipmentParams) (LogisticsShipment, error) {
+	row := q.db.QueryRow(ctx, createLogisticsShipment,
+		arg.ShipmentCode,
+		arg.TransportMode,
+		arg.Priority,
+		arg.Status,
+		arg.PlannedDispatchAt,
+		arg.EstimatedArrivalAt,
+		arg.Notes,
+		arg.LogisticsBatchID,
+	)
+	var i LogisticsShipment
+	err := row.Scan(
+		&i.ID,
+		&i.ShipmentCode,
+		&i.LogisticsBatchID,
+		&i.OriginStationID,
+		&i.DestinationStationID,
+		&i.TransportMode,
+		&i.Priority,
+		&i.Status,
+		&i.IsDefaultRoute,
+		&i.PlannedDispatchAt,
+		&i.EstimatedArrivalAt,
+		&i.DispatchedAt,
+		&i.ReceivedAt,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCargoForQR = `-- name: GetCargoForQR :one
 SELECT c.id,
        c.cargo_code,
@@ -154,6 +329,10 @@ SELECT c.id,
        COALESCE(e.name, '') AS expedition_name,
        c.logistics_batch_id,
        COALESCE(b.batch_code, '') AS logistics_batch_code,
+       c.logistics_shipment_id,
+       COALESCE(shipment.shipment_code, '') AS logistics_shipment_code,
+       COALESCE(shipment.transport_mode, '') AS transport_mode,
+       c.source_cargo_id,
        c.priority,
        c.status,
        c.notes,
@@ -165,6 +344,7 @@ LEFT JOIN stations origin ON origin.id = c.origin_station_id
 JOIN stations destination ON destination.id = c.destination_station_id
 LEFT JOIN expeditions e ON e.id = c.expedition_id
 LEFT JOIN logistics_batches b ON b.id = c.logistics_batch_id
+LEFT JOIN logistics_shipments shipment ON shipment.id = c.logistics_shipment_id
 WHERE c.id = $1
 `
 
@@ -177,6 +357,10 @@ type GetCargoForQRRow struct {
 	ExpeditionName         string             `json:"expedition_name"`
 	LogisticsBatchID       pgtype.UUID        `json:"logistics_batch_id"`
 	LogisticsBatchCode     string             `json:"logistics_batch_code"`
+	LogisticsShipmentID    pgtype.UUID        `json:"logistics_shipment_id"`
+	LogisticsShipmentCode  string             `json:"logistics_shipment_code"`
+	TransportMode          string             `json:"transport_mode"`
+	SourceCargoID          pgtype.UUID        `json:"source_cargo_id"`
 	Priority               string             `json:"priority"`
 	Status                 string             `json:"status"`
 	Notes                  *string            `json:"notes"`
@@ -197,6 +381,10 @@ func (q *Queries) GetCargoForQR(ctx context.Context, cargoID pgtype.UUID) (GetCa
 		&i.ExpeditionName,
 		&i.LogisticsBatchID,
 		&i.LogisticsBatchCode,
+		&i.LogisticsShipmentID,
+		&i.LogisticsShipmentCode,
+		&i.TransportMode,
+		&i.SourceCargoID,
 		&i.Priority,
 		&i.Status,
 		&i.Notes,
@@ -270,15 +458,38 @@ func (q *Queries) GetLogisticsExpeditionWindow(ctx context.Context, expeditionID
 	return i, err
 }
 
+const getLogisticsShipmentWindow = `-- name: GetLogisticsShipmentWindow :one
+SELECT e.planned_start_at, e.planned_end_at
+FROM logistics_batches b
+JOIN expeditions e ON e.id = b.expedition_id
+WHERE b.id = $1
+  AND b.status NOT IN ('received', 'cancelled')
+`
+
+type GetLogisticsShipmentWindowRow struct {
+	PlannedStartAt pgtype.Timestamptz `json:"planned_start_at"`
+	PlannedEndAt   pgtype.Timestamptz `json:"planned_end_at"`
+}
+
+func (q *Queries) GetLogisticsShipmentWindow(ctx context.Context, logisticsBatchID pgtype.UUID) (GetLogisticsShipmentWindowRow, error) {
+	row := q.db.QueryRow(ctx, getLogisticsShipmentWindow, logisticsBatchID)
+	var i GetLogisticsShipmentWindowRow
+	err := row.Scan(&i.PlannedStartAt, &i.PlannedEndAt)
+	return i, err
+}
+
 const listCargo = `-- name: ListCargo :many
 SELECT c.id, c.cargo_code, origin.name AS origin_station_name,
        destination.name AS destination_station_name, COALESCE(e.name, '') AS expedition_name,
-       COALESCE(b.batch_code, '') AS logistics_batch_code, c.priority, c.status, c.notes
+       COALESCE(b.batch_code, '') AS logistics_batch_code,
+       c.logistics_shipment_id, COALESCE(shipment.shipment_code, '') AS logistics_shipment_code,
+       COALESCE(shipment.transport_mode, '') AS transport_mode, c.priority, c.status, c.notes
 FROM cargo c
 LEFT JOIN stations origin ON origin.id = c.origin_station_id
 JOIN stations destination ON destination.id = c.destination_station_id
 LEFT JOIN expeditions e ON e.id = c.expedition_id
 LEFT JOIN logistics_batches b ON b.id = c.logistics_batch_id
+LEFT JOIN logistics_shipments shipment ON shipment.id = c.logistics_shipment_id
 ORDER BY c.created_at DESC
 `
 
@@ -289,6 +500,9 @@ type ListCargoRow struct {
 	DestinationStationName string      `json:"destination_station_name"`
 	ExpeditionName         string      `json:"expedition_name"`
 	LogisticsBatchCode     string      `json:"logistics_batch_code"`
+	LogisticsShipmentID    pgtype.UUID `json:"logistics_shipment_id"`
+	LogisticsShipmentCode  string      `json:"logistics_shipment_code"`
+	TransportMode          string      `json:"transport_mode"`
 	Priority               string      `json:"priority"`
 	Status                 string      `json:"status"`
 	Notes                  *string     `json:"notes"`
@@ -310,6 +524,9 @@ func (q *Queries) ListCargo(ctx context.Context) ([]ListCargoRow, error) {
 			&i.DestinationStationName,
 			&i.ExpeditionName,
 			&i.LogisticsBatchCode,
+			&i.LogisticsShipmentID,
+			&i.LogisticsShipmentCode,
+			&i.TransportMode,
 			&i.Priority,
 			&i.Status,
 			&i.Notes,
@@ -545,9 +762,131 @@ func (q *Queries) ListLogisticsBatches(ctx context.Context) ([]ListLogisticsBatc
 	return items, nil
 }
 
+const listLogisticsShipmentCheckpointPoints = `-- name: ListLogisticsShipmentCheckpointPoints :many
+SELECT DISTINCT ON (scan.scanned_at, scan.latitude, scan.longitude, scan.event_type, scan.cargo_id)
+       scan.id,
+       scan.cargo_id,
+       c.cargo_code,
+       scan.event_type,
+       scan.latitude::DOUBLE PRECISION AS latitude,
+       scan.longitude::DOUBLE PRECISION AS longitude,
+       scan.scanned_at,
+       scan.notes
+FROM cargo_qr_scans scan
+JOIN cargo c ON c.id = scan.cargo_id
+WHERE c.logistics_shipment_id = $1
+  AND scan.latitude IS NOT NULL
+  AND scan.longitude IS NOT NULL
+ORDER BY scan.scanned_at ASC, scan.latitude, scan.longitude, scan.event_type, scan.cargo_id
+`
+
+type ListLogisticsShipmentCheckpointPointsRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	CargoID   pgtype.UUID        `json:"cargo_id"`
+	CargoCode string             `json:"cargo_code"`
+	EventType string             `json:"event_type"`
+	Latitude  float64            `json:"latitude"`
+	Longitude float64            `json:"longitude"`
+	ScannedAt pgtype.Timestamptz `json:"scanned_at"`
+	Notes     *string            `json:"notes"`
+}
+
+func (q *Queries) ListLogisticsShipmentCheckpointPoints(ctx context.Context, logisticsShipmentID pgtype.UUID) ([]ListLogisticsShipmentCheckpointPointsRow, error) {
+	rows, err := q.db.Query(ctx, listLogisticsShipmentCheckpointPoints, logisticsShipmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLogisticsShipmentCheckpointPointsRow{}
+	for rows.Next() {
+		var i ListLogisticsShipmentCheckpointPointsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CargoID,
+			&i.CargoCode,
+			&i.EventType,
+			&i.Latitude,
+			&i.Longitude,
+			&i.ScannedAt,
+			&i.Notes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLogisticsShipmentsForBatch = `-- name: ListLogisticsShipmentsForBatch :many
+SELECT shipment.id,
+       shipment.shipment_code,
+       shipment.transport_mode,
+       shipment.priority,
+       shipment.status,
+       shipment.planned_dispatch_at,
+       shipment.estimated_arrival_at,
+       COUNT(c.id)::INTEGER AS cargo_count,
+       COALESCE(SUM(item_totals.quantity), 0)::DOUBLE PRECISION AS total_quantity
+FROM logistics_shipments shipment
+LEFT JOIN cargo c ON c.logistics_shipment_id = shipment.id
+LEFT JOIN LATERAL (
+    SELECT SUM(ci.quantity) AS quantity
+    FROM cargo_items ci
+    WHERE ci.cargo_id = c.id
+) item_totals ON TRUE
+WHERE shipment.logistics_batch_id = $1
+GROUP BY shipment.id
+ORDER BY shipment.is_default_route DESC, shipment.planned_dispatch_at ASC NULLS LAST, shipment.created_at ASC
+`
+
+type ListLogisticsShipmentsForBatchRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ShipmentCode       string             `json:"shipment_code"`
+	TransportMode      string             `json:"transport_mode"`
+	Priority           string             `json:"priority"`
+	Status             string             `json:"status"`
+	PlannedDispatchAt  pgtype.Timestamptz `json:"planned_dispatch_at"`
+	EstimatedArrivalAt pgtype.Timestamptz `json:"estimated_arrival_at"`
+	CargoCount         int32              `json:"cargo_count"`
+	TotalQuantity      float64            `json:"total_quantity"`
+}
+
+func (q *Queries) ListLogisticsShipmentsForBatch(ctx context.Context, logisticsBatchID pgtype.UUID) ([]ListLogisticsShipmentsForBatchRow, error) {
+	rows, err := q.db.Query(ctx, listLogisticsShipmentsForBatch, logisticsBatchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLogisticsShipmentsForBatchRow{}
+	for rows.Next() {
+		var i ListLogisticsShipmentsForBatchRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ShipmentCode,
+			&i.TransportMode,
+			&i.Priority,
+			&i.Status,
+			&i.PlannedDispatchAt,
+			&i.EstimatedArrivalAt,
+			&i.CargoCount,
+			&i.TotalQuantity,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordCargoQRCheckpoint = `-- name: RecordCargoQRCheckpoint :one
 WITH source AS (
-    SELECT logistics_batch_id
+    SELECT logistics_batch_id, logistics_shipment_id
     FROM cargo
     WHERE id = $1
 ), requested_update AS (
@@ -556,8 +895,9 @@ WITH source AS (
     SELECT c.id
     FROM cargo c
     CROSS JOIN source s
-    WHERE (NOT $3::BOOLEAN AND c.id = $1)
-       OR ($3::BOOLEAN AND c.logistics_batch_id = s.logistics_batch_id)
+    WHERE ($3::TEXT = 'cargo' AND c.id = $1)
+       OR ($3::TEXT = 'shipment' AND c.logistics_shipment_id = s.logistics_shipment_id)
+       OR ($3::TEXT = 'batch' AND c.logistics_batch_id = s.logistics_batch_id)
 ), updated AS (
     UPDATE cargo c
     SET status = COALESCE(requested_update.status, c.status),
@@ -584,6 +924,16 @@ WITH source AS (
            $8::DOUBLE PRECISION, $9
     FROM targets target
     RETURNING id, cargo_id, scanned_at
+), updated_shipments AS (
+    UPDATE logistics_shipments shipment
+    SET status = requested_update.status,
+        dispatched_at = CASE WHEN requested_update.status IN ('dispatched', 'in_transit') THEN COALESCE(shipment.dispatched_at, NOW()) ELSE shipment.dispatched_at END,
+        received_at = CASE WHEN requested_update.status = 'received' THEN COALESCE(shipment.received_at, NOW()) ELSE shipment.received_at END
+    FROM requested_update
+    WHERE requested_update.status IS NOT NULL
+      AND shipment.id IN (SELECT DISTINCT c.logistics_shipment_id FROM cargo c JOIN targets t ON t.id = c.id WHERE c.logistics_shipment_id IS NOT NULL)
+      AND shipment.status NOT IN ('received', 'cancelled')
+    RETURNING shipment.id
 )
 SELECT (SELECT id FROM scans WHERE cargo_id = $1 LIMIT 1) AS scan_id,
        (SELECT scanned_at FROM scans WHERE cargo_id = $1 LIMIT 1) AS scanned_at,
@@ -594,7 +944,7 @@ SELECT (SELECT id FROM scans WHERE cargo_id = $1 LIMIT 1) AS scan_id,
 type RecordCargoQRCheckpointParams struct {
 	CargoID              pgtype.UUID `json:"cargo_id"`
 	Status               *string     `json:"status"`
-	ApplyToBatch         bool        `json:"apply_to_batch"`
+	PropagationScope     string      `json:"propagation_scope"`
 	EventType            string      `json:"event_type"`
 	StationID            pgtype.UUID `json:"station_id"`
 	ScannedByPersonnelID pgtype.UUID `json:"scanned_by_personnel_id"`
@@ -614,7 +964,7 @@ func (q *Queries) RecordCargoQRCheckpoint(ctx context.Context, arg RecordCargoQR
 	row := q.db.QueryRow(ctx, recordCargoQRCheckpoint,
 		arg.CargoID,
 		arg.Status,
-		arg.ApplyToBatch,
+		arg.PropagationScope,
 		arg.EventType,
 		arg.StationID,
 		arg.ScannedByPersonnelID,
@@ -630,6 +980,92 @@ func (q *Queries) RecordCargoQRCheckpoint(ctx context.Context, arg RecordCargoQR
 		&i.StatusUpdatedCount,
 	)
 	return i, err
+}
+
+const splitCargoManifest = `-- name: SplitCargoManifest :one
+WITH source AS (
+    SELECT c.id, c.cargo_code, c.origin_station_id, c.destination_station_id, c.expedition_id, c.logistics_batch_id, c.logistics_shipment_id, c.source_cargo_id, c.priority, c.status, c.created_by_personnel_id, c.dispatched_at, c.received_at, c.notes, c.created_at, c.updated_at
+    FROM cargo c
+    WHERE c.id = $1
+      AND c.status NOT IN ('received', 'cancelled')
+    FOR UPDATE
+), requested AS (
+    SELECT (entry ->> 'item_id')::UUID AS item_id,
+           (entry ->> 'quantity')::NUMERIC(14, 3) AS quantity
+    FROM jsonb_array_elements($2::JSONB) AS entry
+), valid_items AS (
+    SELECT ci.id AS cargo_item_id, ci.item_id, ci.quantity AS source_quantity,
+           requested.quantity
+    FROM cargo_items ci
+    JOIN requested ON requested.item_id = ci.item_id
+    JOIN source ON source.id = ci.cargo_id
+    WHERE requested.quantity > 0
+      AND requested.quantity <= ci.quantity
+    FOR UPDATE OF ci
+), valid_request AS (
+    SELECT COUNT(*) = (SELECT COUNT(*) FROM requested)
+               AND COUNT(*) > 0 AS valid
+    FROM valid_items
+), target_shipment AS (
+    SELECT shipment.id
+    FROM logistics_shipments shipment
+    JOIN source ON source.logistics_batch_id = shipment.logistics_batch_id
+    WHERE shipment.id = COALESCE($3, source.logistics_shipment_id)
+      AND shipment.status NOT IN ('received', 'cancelled')
+), child AS (
+    INSERT INTO cargo (
+        cargo_code, origin_station_id, destination_station_id, expedition_id,
+        logistics_batch_id, logistics_shipment_id, source_cargo_id, priority, status, notes
+    )
+    SELECT $4, source.origin_station_id, source.destination_station_id,
+           source.expedition_id, source.logistics_batch_id, target_shipment.id, source.id,
+           $5, 'draft', $6
+    FROM source CROSS JOIN target_shipment CROSS JOIN valid_request
+    WHERE valid_request.valid
+    RETURNING id
+), reduced AS (
+    UPDATE cargo_items ci
+    SET quantity = ci.quantity - valid_items.quantity
+    FROM valid_items
+    WHERE ci.id = valid_items.cargo_item_id
+      AND EXISTS (SELECT 1 FROM child)
+    RETURNING ci.id
+), child_items AS (
+    INSERT INTO cargo_items (cargo_id, item_id, quantity, declared_weight_kg, notes)
+    SELECT child.id, valid_items.item_id, valid_items.quantity,
+           CASE WHEN valid_items.source_quantity = 0 THEN NULL
+                ELSE source_item.declared_weight_kg * valid_items.quantity / valid_items.source_quantity END,
+           source_item.notes
+    FROM child
+    JOIN valid_items ON TRUE
+    JOIN cargo_items source_item ON source_item.id = valid_items.cargo_item_id
+    RETURNING id
+)
+SELECT child.id
+FROM child
+`
+
+type SplitCargoManifestParams struct {
+	SourceCargoID       pgtype.UUID `json:"source_cargo_id"`
+	ItemsJson           []byte      `json:"items_json"`
+	LogisticsShipmentID pgtype.UUID `json:"logistics_shipment_id"`
+	NewCargoCode        string      `json:"new_cargo_code"`
+	Priority            string      `json:"priority"`
+	Notes               *string     `json:"notes"`
+}
+
+func (q *Queries) SplitCargoManifest(ctx context.Context, arg SplitCargoManifestParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, splitCargoManifest,
+		arg.SourceCargoID,
+		arg.ItemsJson,
+		arg.LogisticsShipmentID,
+		arg.NewCargoCode,
+		arg.Priority,
+		arg.Notes,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateLogisticsBatch = `-- name: UpdateLogisticsBatch :one
