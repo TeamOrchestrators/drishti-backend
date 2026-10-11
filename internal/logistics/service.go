@@ -3,12 +3,14 @@ package logistics
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	db "github.com/TeamOrchestrators/drishti-backend/db/db/generated"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -218,6 +220,9 @@ func (s *Service) SplitCargo(ctx context.Context, sourceCargoID uuid.UUID, reque
 	}
 	childID, err := s.queries.SplitCargoManifest(ctx, params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return SplitCargoResponse{}, fmt.Errorf("split cargo manifest: requested quantities or shipment are not valid")
+		}
 		return SplitCargoResponse{}, fmt.Errorf("split cargo manifest: %w", err)
 	}
 	if !childID.Valid {

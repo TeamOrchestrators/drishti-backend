@@ -55,9 +55,11 @@ const assignCargoToLogisticsShipment = `-- name: AssignCargoToLogisticsShipment 
 UPDATE cargo c
 SET logistics_shipment_id = shipment.id,
     logistics_batch_id = shipment.logistics_batch_id,
+    expedition_id = batch.expedition_id,
     origin_station_id = shipment.origin_station_id,
     destination_station_id = shipment.destination_station_id
 FROM logistics_shipments shipment
+JOIN logistics_batches batch ON batch.id = shipment.logistics_batch_id
 WHERE c.id = $1
   AND shipment.id = $2
   AND shipment.status NOT IN ('received', 'cancelled')
@@ -926,7 +928,7 @@ WITH source AS (
     RETURNING id, cargo_id, scanned_at
 ), updated_shipments AS (
     UPDATE logistics_shipments shipment
-    SET status = requested_update.status,
+    SET status = CASE WHEN requested_update.status = 'in_transit' THEN 'dispatched' ELSE requested_update.status END,
         dispatched_at = CASE WHEN requested_update.status IN ('dispatched', 'in_transit') THEN COALESCE(shipment.dispatched_at, NOW()) ELSE shipment.dispatched_at END,
         received_at = CASE WHEN requested_update.status = 'received' THEN COALESCE(shipment.received_at, NOW()) ELSE shipment.received_at END
     FROM requested_update
@@ -995,7 +997,7 @@ WITH source AS (
     FROM jsonb_array_elements($2::JSONB) AS entry
 ), valid_items AS (
     SELECT ci.id AS cargo_item_id, ci.item_id, ci.quantity AS source_quantity,
-           requested.quantity
+           ci.declared_weight_kg, ci.notes, requested.quantity
     FROM cargo_items ci
     JOIN requested ON requested.item_id = ci.item_id
     JOIN source ON source.id = ci.cargo_id
@@ -1023,22 +1025,32 @@ WITH source AS (
     FROM source CROSS JOIN target_shipment CROSS JOIN valid_request
     WHERE valid_request.valid
     RETURNING id
+), deleted AS (
+    DELETE FROM cargo_items ci
+    USING valid_items
+    WHERE ci.id = valid_items.cargo_item_id
+      AND valid_items.quantity = valid_items.source_quantity
+      AND EXISTS (SELECT 1 FROM child)
+    RETURNING ci.id
 ), reduced AS (
     UPDATE cargo_items ci
     SET quantity = ci.quantity - valid_items.quantity
     FROM valid_items
     WHERE ci.id = valid_items.cargo_item_id
+      AND valid_items.quantity < valid_items.source_quantity
       AND EXISTS (SELECT 1 FROM child)
     RETURNING ci.id
+), mutations_done AS (
+    SELECT (SELECT COUNT(*) FROM deleted) + (SELECT COUNT(*) FROM reduced) AS count
 ), child_items AS (
     INSERT INTO cargo_items (cargo_id, item_id, quantity, declared_weight_kg, notes)
     SELECT child.id, valid_items.item_id, valid_items.quantity,
            CASE WHEN valid_items.source_quantity = 0 THEN NULL
-                ELSE source_item.declared_weight_kg * valid_items.quantity / valid_items.source_quantity END,
-           source_item.notes
+                ELSE valid_items.declared_weight_kg * valid_items.quantity / valid_items.source_quantity END,
+           valid_items.notes
     FROM child
     JOIN valid_items ON TRUE
-    JOIN cargo_items source_item ON source_item.id = valid_items.cargo_item_id
+    CROSS JOIN mutations_done
     RETURNING id
 )
 SELECT child.id

@@ -141,9 +141,21 @@ SELECT e.id,
        e.severity,
        e.status,
        e.summary,
-       COALESCE(e.latitude, 0)::DOUBLE PRECISION AS latitude,
-       COALESCE(e.longitude, 0)::DOUBLE PRECISION AS longitude,
-       COALESCE(e.location_accuracy_m, 0)::DOUBLE PRECISION AS location_accuracy_m,
+       COALESCE(
+           CASE WHEN e.status IN ('active', 'acknowledged', 'responding') THEN d.last_latitude END,
+           e.latitude,
+           0
+       )::DOUBLE PRECISION AS latitude,
+       COALESCE(
+           CASE WHEN e.status IN ('active', 'acknowledged', 'responding') THEN d.last_longitude END,
+           e.longitude,
+           0
+       )::DOUBLE PRECISION AS longitude,
+       COALESCE(
+           CASE WHEN e.status IN ('active', 'acknowledged', 'responding') THEN d.last_accuracy_m END,
+           e.location_accuracy_m,
+           0
+       )::DOUBLE PRECISION AS location_accuracy_m,
        e.reported_at,
        e.resolved_at,
        COALESCE(p.full_name, '') AS reported_by_name,
